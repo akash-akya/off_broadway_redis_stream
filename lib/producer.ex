@@ -16,6 +16,8 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:consumer_name` - Required. Redis Consumer name for the producer
 
+    * `:on_failure` - Optional. Behaviour when consumer fails to proccess message. See Acknowledgments section below. Default is `:ack`
+
   ## Producer Options
 
   These options applies to all producers, regardless of client implementation:
@@ -26,10 +28,21 @@ defmodule OffBroadwayRedisStream.Producer do
       to the client. It's up to the client to normalize the options it needs. Default
       is `OffBroadwayRedisStream.RedixClient`.
 
+    * `:receive_interval` - Optional. The duration (in milliseconds) for which the producer
+      waits before making a request for more messages. Default is 5000.
+
   ## Acknowledgments
 
   In case of successful processing, the message is properly acknowledge to Redis Consumer Group.
   In case of failures, no message is acknowledged, which means Message will wont be removed from pending entries list (PEL). As of now consumer have to handle failure scenario to clean up pending entries. For more information, see: [Recovering from permanent failures](https://redis.io/topics/streams-intro#recovering-from-permanent-failures)
+
+  You can use the and `:on_failure` option to control how messages are acked on consumer group.
+  By default successful messages are acked and failed messages are not acked and messages are reenqueued to main stream after .
+  You can set `:on_failure` when starting the producer,
+  or change them for each message through `Broadway.Message.configure_ack/2`
+  Here is the list of all possible values supported by `:on_failure`:
+  * `:ack` - Acknowledge the message. RedixClient will mark the message as acked.
+  * `:ignore` - Don't do anything. It won't notify to Redis consumer group, and it will stay in pending entries list of consumer group.
 
   ## Message Data
 
@@ -40,16 +53,25 @@ defmodule OffBroadwayRedisStream.Producer do
   alias Broadway.Producer
   @behaviour Producer
 
+  @default_receive_interval 5000
+
   @impl GenStage
   def init(opts) do
     client = opts[:client] || OffBroadwayRedisStream.RedixClient
+    receive_interval = opts[:receive_interval] || @default_receive_interval
 
     case client.init(opts) do
       {:error, message} ->
         raise ArgumentError, "invalid options given to #{inspect(client)}.init/1, " <> message
 
       {:ok, opts} ->
-        {:producer, %{demand: 0, redis_client: {client, opts}}}
+        {:producer,
+         %{
+           demand: 0,
+           redis_client: {client, opts},
+           receive_timer: nil,
+           receive_interval: receive_interval
+         }}
     end
   end
 
@@ -59,29 +81,46 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   @impl GenStage
-  def handle_info(:receive_messages, state) do
-    receive_messages(state)
+  def handle_info(:receive_messages, %{receive_timer: nil} = state) do
+    {:noreply, [], state}
   end
 
-  defp receive_messages(%{demand: demand, redis_client: {client, opts}} = state)
-       when demand > 0 do
+  @impl GenStage
+  def handle_info(:receive_messages, state) do
+    receive_messages(%{state | receive_timer: nil})
+  end
+
+  @impl GenStage
+  def handle_info(_, state) do
+    {:noreply, [], state}
+  end
+
+  @impl Producer
+  def prepare_for_draining(%{receive_timer: receive_timer} = state) do
+    receive_timer && Process.cancel_timer(receive_timer)
+    {:noreply, [], %{state | receive_timer: nil}}
+  end
+
+  defp receive_messages(%{receive_timer: nil, demand: demand} = state) when demand > 0 do
+    {client, opts} = state.redis_client
     messages = client.receive_messages(state.demand, opts)
     new_demand = demand - length(messages)
 
-    case {messages, new_demand} do
-      {[], _} -> receive_messages(state)
-      {_, 0} -> nil
-      _ -> receive_more_messages()
-    end
+    receive_timer =
+      case {messages, new_demand} do
+        {[], _} -> schedule_receive_messages(state.receive_interval)
+        {_, 0} -> nil
+        _ -> schedule_receive_messages(0)
+      end
 
-    {:noreply, messages, %{state | demand: new_demand}}
+    {:noreply, messages, %{state | demand: new_demand, receive_timer: receive_timer}}
   end
 
   defp receive_messages(state) do
     {:noreply, [], state}
   end
 
-  defp receive_more_messages() do
-    GenStage.async_info(self(), :receive_messages)
+  defp schedule_receive_messages(interval) do
+    Process.send_after(self(), :receive_messages, interval)
   end
 end
