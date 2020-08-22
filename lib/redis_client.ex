@@ -4,7 +4,9 @@ defmodule OffBroadwayRedisStream.RedisClient do
 
   @type messages :: [Message.t()]
 
-  @callback init(opts :: any) :: {:ok, any} | {:error, any}
+  @type opts :: any
 
-  @callback receive_messages(demand :: pos_integer, opts :: any) :: messages
+  @callback init(opts) :: {:ok, any} | {:error, any}
+
+  @callback receive_messages(demand :: pos_integer, opts) :: {messages, opts}
 end

@@ -16,8 +16,6 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:consumer_name` - Required. Redis Consumer name for the producer
 
-    * `:on_failure` - Optional. Behaviour when consumer fails to proccess message. See Acknowledgments section below. Default is `:ack`
-
   ## Producer Options
 
   These options applies to all producers, regardless of client implementation:
@@ -33,16 +31,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
   ## Acknowledgments
 
-  In case of successful processing, the message is properly acknowledge to Redis Consumer Group.
-  In case of failures, no message is acknowledged, which means Message will wont be removed from pending entries list (PEL). As of now consumer have to handle failure scenario to clean up pending entries. For more information, see: [Recovering from permanent failures](https://redis.io/topics/streams-intro#recovering-from-permanent-failures)
-
-  You can use the and `:on_failure` option to control how messages are acked on consumer group.
-  By default successful messages are acked and failed messages are not acked and messages are reenqueued to main stream after .
-  You can set `:on_failure` when starting the producer,
-  or change them for each message through `Broadway.Message.configure_ack/2`
-  Here is the list of all possible values supported by `:on_failure`:
-  * `:ack` - Acknowledge the message. RedixClient will mark the message as acked.
-  * `:ignore` - Don't do anything. It won't notify to Redis consumer group, and it will stay in pending entries list of consumer group.
+  Both successful and failed messages are acknowledged. use `handle_failure` callback to handle failures such as moving to other stream or persisting failure job etc
 
   ## Message Data
 
@@ -103,7 +92,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp receive_messages(%{receive_timer: nil, demand: demand} = state) when demand > 0 do
     {client, opts} = state.redis_client
-    messages = client.receive_messages(state.demand, opts)
+    {messages, opts} = client.receive_messages(state.demand, opts)
     new_demand = demand - length(messages)
 
     receive_timer =
@@ -113,7 +102,14 @@ defmodule OffBroadwayRedisStream.Producer do
         _ -> schedule_receive_messages(0)
       end
 
-    {:noreply, messages, %{state | demand: new_demand, receive_timer: receive_timer}}
+    state = %{
+      state
+      | demand: new_demand,
+        receive_timer: receive_timer,
+        redis_client: {client, opts}
+    }
+
+    {:noreply, messages, state}
   end
 
   defp receive_messages(state) do
