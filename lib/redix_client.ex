@@ -12,7 +12,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
     with :ok <- validate(opts) do
       config = Map.new(opts)
       ack_ref = Broadway.TermStorage.put(config)
-      {:ok, Map.merge(config, %{ack_ref: ack_ref, last_id: "0"})}
+      {:ok, Map.merge(config, %{ack_ref: ack_ref, last_id: "0", min_idle_time: 30_000})}
     end
   end
 
@@ -48,6 +48,16 @@ defmodule OffBroadwayRedisStream.RedixClient do
     {:ok, ack_data}
   end
 
+  @impl true
+  def heartbeat(opts) do
+    cmd = ~w(XPENDING #{opts.stream} #{opts.consumer_group} 0 0 0 #{opts.consumer_name})
+
+    case Redix.command(opts.redis_instance, cmd) do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
   defp wrap_received_messages(messages, ack_ref) do
     Enum.map(messages, fn message ->
       acknowledger = build_acknowledger(message, ack_ref)
@@ -61,7 +71,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   defp ack_messages([], _opts, _kind), do: :ok
 
-  defp ack_messages(messages, opts, kind) do
+  defp ack_messages(messages, opts, _kind) do
     messages
     |> apply_ack_func(opts)
     |> handle_acknowledged_messages()

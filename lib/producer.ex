@@ -53,13 +53,19 @@ defmodule OffBroadwayRedisStream.Producer do
       {:error, message} ->
         raise ArgumentError, "invalid options given to #{inspect(client)}.init/1, " <> message
 
-      {:ok, opts} ->
+      {:ok, redis_opts} ->
+        redis_client = {client, redis_opts}
+
+        {:ok, watcher} =
+          OffBroadwayRedisStream.Watcher.start_link(redis_client, opts[:heartbeat_time])
+
         {:producer,
          %{
            demand: 0,
-           redis_client: {client, opts},
+           redis_client: redis_client,
            receive_timer: nil,
-           receive_interval: receive_interval
+           receive_interval: receive_interval,
+           watcher: watcher
          }}
     end
   end
