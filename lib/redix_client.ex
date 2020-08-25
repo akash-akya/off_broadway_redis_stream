@@ -48,13 +48,52 @@ defmodule OffBroadwayRedisStream.RedixClient do
     {:ok, ack_data}
   end
 
+  @max_id round(:math.pow(2, 64)) - 1
+
   @impl true
-  def heartbeat(opts) do
-    cmd = ~w(XPENDING #{opts.stream} #{opts.consumer_group} 0 0 0 #{opts.consumer_name})
+  def heartbeat(%{consumer_group: group, consumer_name: name, stream: stream} = opts) do
+    # we refresh idle time by attempting to read non-existent entry
+    cmd = ~w(XREADGROUP GROUP #{group} #{name} COUNT 1 STREAMS #{stream} #{@max_id})
 
     case Redix.command(opts.redis_instance, cmd) do
-      {:ok, _} -> :ok
+      {:ok, [[^stream, []]]} -> :ok
       error -> error
+    end
+  end
+
+  @impl true
+  def consumers_info(opts) do
+    cmd = ~w(XINFO consumers #{opts.stream} #{opts.consumer_group})
+
+    case Redix.command(opts.redis_instance, cmd) do
+      {:ok, info} -> {:ok, to_map(info)}
+      error -> error
+    end
+  end
+
+  @impl true
+  def pending(opts, consumer, count) do
+    cmd = ~w(XPENDING #{opts.stream} #{opts.consumer_group} - + #{count} #{consumer})
+
+    case Redix.command(opts.redis_instance, cmd) do
+      {:ok, res} -> {:ok, res}
+      error -> error
+    end
+  end
+
+  @impl true
+  def claim(opts, idle, ids) do
+    cmd = ["XCLAIM", opts.stream, opts.consumer_group, opts.consumer_name, idle] ++ ids
+
+    case Redix.command(opts.redis_instance, cmd) do
+      {:ok, nil} ->
+        {:ok, []}
+
+      {:ok, messages} ->
+        {:ok, wrap_received_messages(messages, opts.ack_ref)}
+
+      error ->
+        error
     end
   end
 
@@ -137,4 +176,24 @@ defmodule OffBroadwayRedisStream.RedixClient do
   defp validation_error(option, expected, value) do
     {:error, "expected #{inspect(option)} to be #{expected}, got: #{inspect(value)}"}
   end
+
+  defp to_map(info), do: to_map(info, [])
+
+  defp to_map([], [{_key, _value} | _] = acc), do: Map.new(acc)
+
+  defp to_map([], acc), do: Enum.reverse(acc)
+
+  defp to_map([key, value | rest], acc) when is_binary(key) do
+    to_map(rest, [{key, to_map(value)} | acc])
+  end
+
+  defp to_map([info | rest], acc) when is_list(info) do
+    to_map(rest, [to_map(info) | acc])
+  end
+
+  defp to_map([info | rest], acc) do
+    to_map(rest, [info | acc])
+  end
+
+  defp to_map(info, _acc), do: info
 end

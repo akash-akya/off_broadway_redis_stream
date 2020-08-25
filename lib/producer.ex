@@ -3,12 +3,14 @@ defmodule OffBroadwayRedisStream.Producer do
   A GenStage Producer for Redis Stream.
   Acts as a unique consumer in specified Consumer Group. see https://redis.io/topics/streams-intro.
 
-  Note: Successfully handled messaged are acknowledged automatically. Failure needs to be handled by the consumer
-  by explicitly.
+  Producer automatically claim pending messages after certain timeout in case of abnormal termination of a producer.
 
-  ## Options for `OffBroadwayRedisStream.RedixClient`
+  ## Producer Options
 
     * `:redis_instance` - Required. Redix instance must started separately and name of that instance needs to be passed. For more infromation see [Redix Documentation](https://hexdocs.pm/redix/Redix.html#start_link/1)
+
+    * `:receive_interval` - Optional. The duration (in milliseconds) for which the producer
+      waits before making a request for more messages if there are no events in stream. Default is 2000.
 
     * `:stream` - Required. Redis stream name
 
@@ -16,18 +18,9 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:consumer_name` - Required. Redis Consumer name for the producer
 
-  ## Producer Options
+    * `:heartbeat` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
 
-  These options applies to all producers, regardless of client implementation:
-
-    * `:client` - Optional. A module that implements the `OffBroadwayRedisStream.RedisClient`
-      behaviour. This module is responsible for fetching and acknowledging the
-      messages. Pay attention that all options passed to the producer will be forwarded
-      to the client. It's up to the client to normalize the options it needs. Default
-      is `OffBroadwayRedisStream.RedixClient`.
-
-    * `:receive_interval` - Optional. The duration (in milliseconds) for which the producer
-      waits before making a request for more messages. Default is 5000.
+    * `:allowed_missed_heartbeats` - Optional. Missed heartbeats allowed, after this that consumer is considered to be dead and other consumers claim its pending events. Default is 4
 
   ## Acknowledgments
 
@@ -42,12 +35,18 @@ defmodule OffBroadwayRedisStream.Producer do
   alias Broadway.Producer
   @behaviour Producer
 
-  @default_receive_interval 5000
+  @default_receive_interval 2000
+  @default_allowed_missed_heartbeats 4
+  @default_heartbeat_time 5000
 
   @impl GenStage
   def init(opts) do
     client = opts[:client] || OffBroadwayRedisStream.RedixClient
     receive_interval = opts[:receive_interval] || @default_receive_interval
+    heartbeat_time = opts[:heartbeat_time] || @default_heartbeat_time
+
+    allowed_missed_heartbeats =
+      opts[:allowed_missed_heartbeats] || @default_allowed_missed_heartbeats
 
     case client.init(opts) do
       {:error, message} ->
@@ -56,8 +55,7 @@ defmodule OffBroadwayRedisStream.Producer do
       {:ok, redis_opts} ->
         redis_client = {client, redis_opts}
 
-        {:ok, watcher} =
-          OffBroadwayRedisStream.Watcher.start_link(redis_client, opts[:heartbeat_time])
+        {:ok, watcher} = OffBroadwayRedisStream.Watcher.start_link(redis_client, heartbeat_time)
 
         {:producer,
          %{
@@ -65,7 +63,10 @@ defmodule OffBroadwayRedisStream.Producer do
            redis_client: redis_client,
            receive_timer: nil,
            receive_interval: receive_interval,
-           watcher: watcher
+           watcher: watcher,
+           heartbeat_time: heartbeat_time,
+           allowed_missed_heartbeats: allowed_missed_heartbeats,
+           last_checked: 0
          }}
     end
   end
@@ -97,23 +98,12 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp receive_messages(%{receive_timer: nil, demand: demand} = state) when demand > 0 do
-    {client, opts} = state.redis_client
-    {messages, opts} = client.receive_messages(state.demand, opts)
-    new_demand = demand - length(messages)
+    {claimed_messages, state} = maybe_claim_dead_consumer_messages(state)
+    {new_messages, state} = fetch_messages(state)
+    messages = Enum.concat([claimed_messages, new_messages])
 
-    receive_timer =
-      case {messages, new_demand} do
-        {[], _} -> schedule_receive_messages(state.receive_interval)
-        {_, 0} -> nil
-        _ -> schedule_receive_messages(0)
-      end
-
-    state = %{
-      state
-      | demand: new_demand,
-        receive_timer: receive_timer,
-        redis_client: {client, opts}
-    }
+    receive_timer = maybe_scheduler_timer(state, messages, state.demand)
+    state = %{state | receive_timer: receive_timer}
 
     {:noreply, messages, state}
   end
@@ -122,7 +112,116 @@ defmodule OffBroadwayRedisStream.Producer do
     {:noreply, [], state}
   end
 
+  defp maybe_scheduler_timer(state, messages, demand) do
+    case {messages, demand} do
+      {[], _} -> schedule_receive_messages(state.receive_interval)
+      {_, 0} -> nil
+      _ -> schedule_receive_messages(0)
+    end
+  end
+
   defp schedule_receive_messages(interval) do
     Process.send_after(self(), :receive_messages, interval)
   end
+
+  defp maybe_claim_dead_consumer_messages(state) do
+    now = DateTime.utc_now() |> DateTime.to_unix()
+    expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
+
+    if now - state.last_checked > expire_time do
+      {messages, state} = claim_dead_consumer_messages(state)
+
+      if length(messages) >= 0 do
+        {messages, state}
+      else
+        {[], %{state | last_checked: now}}
+      end
+    else
+      {[], state}
+    end
+  end
+
+  defp claim_dead_consumer_messages(state, acc \\ []) do
+    {client, opts} = state.redis_client
+    {:ok, consumers} = client.consumers_info(opts)
+    expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
+
+    {status, messages} =
+      consumers
+      |> dead_consumers(expire_time)
+      |> claim_consumers(state)
+
+    messages = acc ++ messages
+    state = %{state | demand: state.demand - length(messages)}
+
+    case status do
+      :ok -> {messages, state}
+      # someone else consumed messages
+      :reset -> claim_dead_consumer_messages(state, messages)
+    end
+  end
+
+  defp dead_consumers(consumers, expire_time) do
+    consumers
+    |> Enum.filter(fn consumer ->
+      consumer["pending"] > 0 && consumer["idle"] > expire_time
+    end)
+  end
+
+  defp claim_consumers(consumers, state) do
+    consumers
+    |> Enum.concat([:end])
+    |> Enum.reduce_while(
+      {[], state.demand},
+      fn
+        :end, {acc, demand} ->
+          {:halt, {:ok, acc}}
+
+        consumer, {acc, demand} ->
+          case claim_consumer(state, consumer, demand) do
+            {:ok, messages} when length(messages) == demand ->
+              {:halt, {:ok, acc ++ messages}}
+
+            {:ok, messages} ->
+              {:cont, {acc ++ messages, demand - length(messages)}}
+
+            {:reset, messages} ->
+              {:halt, {:reset, acc ++ messages}}
+          end
+      end
+    )
+  end
+
+  defp claim_consumer(state, consumer, demand) do
+    {client, opts} = state.redis_client
+    count = min(consumer["pending"], demand)
+
+    {:ok, pending_messages} = client.pending(opts, consumer["name"], count)
+    ids = Enum.map(pending_messages, &Enum.at(&1, 0))
+    {:ok, messages} = client.claim(opts, consumer["idle"], ids)
+
+    received = length(messages)
+
+    cond do
+      received == demand ->
+        {:ok, messages}
+
+      received != length(ids) ->
+        # someone else consumed messages
+        {:reset, messages}
+
+      true ->
+        {:ok, messages}
+    end
+  end
+
+  defp fetch_messages(%{demand: demand} = state) when demand > 0 do
+    {client, opts} = state.redis_client
+    {messages, opts} = client.receive_messages(state.demand, opts)
+
+    state = %{state | demand: state.demand - length(messages), redis_client: {client, opts}}
+    {messages, state}
+  end
+
+  defp fetch_messages(state), do: {[], state}
 end

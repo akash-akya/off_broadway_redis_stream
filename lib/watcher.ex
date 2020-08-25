@@ -11,7 +11,6 @@ defmodule OffBroadwayRedisStream.Watcher do
 
   @impl true
   def init({client, heartbeat_time}) do
-    heartbeat_time = heartbeat_time || @default_heartbeat_time
     state = %{client: client, heartbeat_time: heartbeat_time}
     {:ok, state, {:continue, nil}}
   end
