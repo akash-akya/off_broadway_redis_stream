@@ -52,18 +52,18 @@ defmodule OffBroadwayRedisStream.Producer do
       {:error, message} ->
         raise ArgumentError, "invalid options given to #{inspect(client)}.init/1, " <> message
 
-      {:ok, redis_opts} ->
-        redis_client = {client, redis_opts}
-
-        {:ok, watcher} = OffBroadwayRedisStream.Watcher.start_link(redis_client, heartbeat_time)
+      {:ok, redis_state} ->
+        {:ok, heartbeat} =
+          OffBroadwayRedisStream.Heartbeat.start_link(client, redis_state, heartbeat_time)
 
         {:producer,
          %{
            demand: 0,
-           redis_client: redis_client,
-           receive_timer: nil,
+           redis_client: client,
+           redis_state: redis_state,
            receive_interval: receive_interval,
-           watcher: watcher,
+           heartbeat: heartbeat,
+           receive_timer: nil,
            heartbeat_time: heartbeat_time,
            allowed_missed_heartbeats: allowed_missed_heartbeats,
            last_checked: 0
@@ -142,8 +142,7 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp claim_dead_consumer_messages(state, acc \\ []) do
-    {client, opts} = state.redis_client
-    {:ok, consumers} = client.consumers_info(opts)
+    {:ok, consumers} = consumers_info(state)
     expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
 
     {status, messages} =
@@ -174,7 +173,7 @@ defmodule OffBroadwayRedisStream.Producer do
     |> Enum.reduce_while(
       {[], state.demand},
       fn
-        :end, {acc, demand} ->
+        :end, {acc, _demand} ->
           {:halt, {:ok, acc}}
 
         consumer, {acc, demand} ->
@@ -192,13 +191,12 @@ defmodule OffBroadwayRedisStream.Producer do
     )
   end
 
-  defp claim_consumer(state, consumer, demand) do
-    {client, opts} = state.redis_client
+  defp claim_consumer(%{redis_client: client, redis_state: redis_state}, consumer, demand) do
     count = min(consumer["pending"], demand)
 
-    {:ok, pending_messages} = client.pending(opts, consumer["name"], count)
+    {:ok, pending_messages} = client.pending(redis_state, consumer["name"], count)
     ids = Enum.map(pending_messages, &Enum.at(&1, 0))
-    {:ok, messages} = client.claim(opts, consumer["idle"], ids)
+    {:ok, messages} = client.claim(redis_state, consumer["idle"], ids)
 
     received = length(messages)
 
@@ -215,13 +213,15 @@ defmodule OffBroadwayRedisStream.Producer do
     end
   end
 
-  defp fetch_messages(%{demand: demand} = state) when demand > 0 do
-    {client, opts} = state.redis_client
-    {messages, opts} = client.receive_messages(state.demand, opts)
-
-    state = %{state | demand: state.demand - length(messages), redis_client: {client, opts}}
-    {messages, state}
+  defp fetch_messages(%{demand: demand, redis_client: client, redis_state: redis_state} = state)
+       when demand > 0 do
+    {messages, redis_state} = client.receive_messages(state.demand, redis_state)
+    {messages, %{state | redis_state: redis_state, demand: state.demand - length(messages)}}
   end
 
   defp fetch_messages(state), do: {[], state}
+
+  defp consumers_info(%{redis_client: client, redis_state: redis_state}) do
+    client.consumers_info(redis_state)
+  end
 end
