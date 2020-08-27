@@ -5,6 +5,8 @@ defmodule OffBroadwayRedisStream.Producer do
 
   Producer automatically claim pending messages after certain timeout in case of abnormal termination of a producer.
 
+  Currently it only support Redis 6.0 and above
+
   ## Producer Options
 
     * `:redis_instance` - Required. Redix instance must started separately and name of that instance needs to be passed. For more infromation see [Redix Documentation](https://hexdocs.pm/redix/Redix.html#start_link/1)
@@ -14,11 +16,11 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:stream` - Required. Redis stream name
 
-    * `:consumer_group` - Required. Redis consumer group
+    * `:group` - Required. Redis consumer group
 
     * `:consumer_name` - Required. Redis Consumer name for the producer
 
-    * `:heartbeat` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
+    * `:heartbeat_time` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
 
     * `:allowed_missed_heartbeats` - Optional. Missed heartbeats allowed, after this that consumer is considered to be dead and other consumers claim its pending events. Default is 4
 
@@ -33,41 +35,45 @@ defmodule OffBroadwayRedisStream.Producer do
 
   use GenStage
   alias Broadway.Producer
+  alias Broadway.Message
+  alias OffBroadwayRedisStream.Acknowledger
+  alias OffBroadwayRedisStream.Heartbeat
+  require Logger
+
   @behaviour Producer
 
-  @default_receive_interval 2000
-  @default_allowed_missed_heartbeats 4
-  @default_heartbeat_time 5000
+  @default_opts [
+    heartbeat_time: 5000,
+    receive_interval: 2000,
+    client: OffBroadwayRedisStream.RedixClient,
+    allowed_missed_heartbeats: 4
+  ]
 
   @impl GenStage
   def init(opts) do
-    client = opts[:client] || OffBroadwayRedisStream.RedixClient
-    receive_interval = opts[:receive_interval] || @default_receive_interval
-    heartbeat_time = opts[:heartbeat_time] || @default_heartbeat_time
-
-    allowed_missed_heartbeats =
-      opts[:allowed_missed_heartbeats] || @default_allowed_missed_heartbeats
+    opts = Keyword.merge(@default_opts, opts)
+    validate!(opts)
+    client = opts[:client]
 
     case client.init(opts) do
       {:error, message} ->
         raise ArgumentError, "invalid options given to #{inspect(client)}.init/1, " <> message
 
-      {:ok, redis_state} ->
-        {:ok, heartbeat} =
-          OffBroadwayRedisStream.Heartbeat.start_link(client, redis_state, heartbeat_time)
+      {:ok, redis_config} ->
+        {:ok, _} = Heartbeat.start_link(client, redis_config, opts[:heartbeat_time])
 
-        {:producer,
-         %{
-           demand: 0,
-           redis_client: client,
-           redis_state: redis_state,
-           receive_interval: receive_interval,
-           heartbeat: heartbeat,
-           receive_timer: nil,
-           heartbeat_time: heartbeat_time,
-           allowed_missed_heartbeats: allowed_missed_heartbeats,
-           last_checked: 0
-         }}
+        state =
+          Map.new(opts)
+          |> Map.merge(%{
+            demand: 0,
+            redis_client: client,
+            redis_config: redis_config,
+            receive_timer: nil,
+            last_id: "0",
+            last_checked: 0
+          })
+
+        {:producer, state}
     end
   end
 
@@ -87,6 +93,12 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   @impl GenStage
+  def handle_info({:ack, ids}, state) do
+    ack_ids(state, ids)
+    {:noreply, [], state}
+  end
+
+  @impl GenStage
   def handle_info(_, state) do
     {:noreply, [], state}
   end
@@ -98,23 +110,25 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp receive_messages(%{receive_timer: nil, demand: demand} = state) when demand > 0 do
-    {claimed_messages, state} = maybe_claim_dead_consumer_messages(state)
-    {new_messages, state} = fetch_messages(state)
-    messages = Enum.concat([claimed_messages, new_messages])
+    {claimed_messages, last_checked} = maybe_claim_dead_consumer_messages(state)
+    state = %{state | demand: state.demand - length(claimed_messages), last_checked: last_checked}
 
-    receive_timer = maybe_scheduler_timer(state, messages, state.demand)
-    state = %{state | receive_timer: receive_timer}
+    {new_messages, last_id} = fetch_messages_from_redis(state)
+    state = %{state | demand: state.demand - length(new_messages), last_id: last_id}
 
-    {:noreply, messages, state}
+    messages = claimed_messages ++ new_messages
+    receive_timer = maybe_schedule_timer(state, length(messages), state.demand)
+
+    {:noreply, messages, %{state | receive_timer: receive_timer}}
   end
 
   defp receive_messages(state) do
     {:noreply, [], state}
   end
 
-  defp maybe_scheduler_timer(state, messages, demand) do
-    case {messages, demand} do
-      {[], _} -> schedule_receive_messages(state.receive_interval)
+  defp maybe_schedule_timer(state, current, demand) do
+    case {current, demand} do
+      {0, _} -> schedule_receive_messages(state.receive_interval)
       {_, 0} -> nil
       _ -> schedule_receive_messages(0)
     end
@@ -125,19 +139,21 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp maybe_claim_dead_consumer_messages(state) do
-    now = DateTime.utc_now() |> DateTime.to_unix()
+    now = DateTime.utc_now() |> DateTime.to_unix(:millisecond)
     expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
+    last_checked = state.last_checked
 
-    if now - state.last_checked > expire_time do
-      {messages, state} = claim_dead_consumer_messages(state)
+    if now - last_checked > expire_time do
+      {redis_messages, state} = claim_dead_consumer_messages(state)
 
-      if length(messages) >= 0 do
-        {messages, state}
+      if length(redis_messages) > 0 do
+        %{stream: stream, group: group} = state
+        {wrap_messages(redis_messages, stream, group), last_checked}
       else
-        {[], %{state | last_checked: now}}
+        {[], now}
       end
     else
-      {[], state}
+      {[], last_checked}
     end
   end
 
@@ -191,12 +207,12 @@ defmodule OffBroadwayRedisStream.Producer do
     )
   end
 
-  defp claim_consumer(%{redis_client: client, redis_state: redis_state}, consumer, demand) do
+  defp claim_consumer(%{redis_client: client, redis_config: redis_config}, consumer, demand) do
     count = min(consumer["pending"], demand)
 
-    {:ok, pending_messages} = client.pending(redis_state, consumer["name"], count)
+    {:ok, pending_messages} = client.pending(consumer["name"], count, redis_config)
     ids = Enum.map(pending_messages, &Enum.at(&1, 0))
-    {:ok, messages} = client.claim(redis_state, consumer["idle"], ids)
+    {:ok, messages} = client.claim(consumer["idle"], ids, redis_config)
 
     received = length(messages)
 
@@ -213,15 +229,119 @@ defmodule OffBroadwayRedisStream.Producer do
     end
   end
 
-  defp fetch_messages(%{demand: demand, redis_client: client, redis_state: redis_state} = state)
-       when demand > 0 do
-    {messages, redis_state} = client.receive_messages(state.demand, redis_state)
-    {messages, %{state | redis_state: redis_state, demand: state.demand - length(messages)}}
+  @max_messages 1000
+
+  defp fetch_messages_from_redis(%{demand: demand} = state) when demand == 0,
+    do: {[], state.last_id}
+
+  defp fetch_messages_from_redis(state) do
+    %{
+      demand: demand,
+      redis_client: client,
+      redis_config: redis_config,
+      stream: stream,
+      group: group,
+      consumer_name: consumer_name,
+      last_id: last_id
+    } = state
+
+    count = min(demand, @max_messages)
+
+    case client.fetch(count, last_id, redis_config) do
+      {:ok, []} ->
+        {[], ">"}
+
+      {:ok, redis_messages} ->
+        last_id =
+          cond do
+            last_id == ">" ->
+              ">"
+
+            length(redis_messages) < count ->
+              ">"
+
+            true ->
+              [last_id, _] = List.last(redis_messages)
+              last_id
+          end
+
+        {wrap_messages(redis_messages, stream, group), last_id}
+
+      {:error, reason} ->
+        raise "cannot fetch messages from Redis (stream=#{stream} group=#{group} " <>
+                "consumer=#{consumer_name}). Reason: #{inspect(reason)}"
+    end
   end
 
-  defp fetch_messages(state), do: {[], state}
+  defp consumers_info(%{redis_client: client, redis_config: redis_config}) do
+    client.consumers_info(redis_config)
+  end
 
-  defp consumers_info(%{redis_client: client, redis_state: redis_state}) do
-    client.consumers_info(redis_state)
+  defp wrap_messages(redis_messages, stream, group) do
+    Enum.map(redis_messages, fn [id, _] = data ->
+      ack_data = %{id: id}
+      ack_ref = {self(), {stream, group}}
+
+      %Message{data: data, acknowledger: {Acknowledger, ack_ref, ack_data}}
+    end)
+  end
+
+  defp ack_ids(state, ids) do
+    %{redis_client: client, redis_config: redis_config} = state
+
+    case client.ack(ids, redis_config) do
+      :ok ->
+        :ok
+
+      error ->
+        Logger.error("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
+    end
+  end
+
+  defp validate!(opts) do
+    case validate(opts) do
+      :ok -> :ok
+      {:error, error} -> raise ArgumentError, message: error
+    end
+  end
+
+  defp validate(opts) when is_list(opts) do
+    with :ok <- validate_option(:redis_instance, opts[:redis_instance]),
+         :ok <- validate_option(:stream, opts[:stream]),
+         :ok <- validate_option(:group, opts[:group]),
+         :ok <- validate_option(:consumer_name, opts[:consumer_name]),
+         :ok <- validate_option(:receive_interval, opts[:receive_interval]),
+         :ok <- validate_option(:allowed_missed_heartbeats, opts[:allowed_missed_heartbeats]),
+         :ok <- validate_option(:heartbeat_time, opts[:heartbeat_time]) do
+      :ok
+    end
+  end
+
+  defp validate_option(:redis_instance, value) when not is_atom(value) or is_nil(value),
+    do: validation_error(:redis_instance, "an atom", value)
+
+  defp validate_option(:group, value) when not is_binary(value) or value == "",
+    do: validation_error(:group, "a non empty string", value)
+
+  defp validate_option(:consumer_name, value) when not is_binary(value) or value == "",
+    do: validation_error(:consumer_name, "a non empty string", value)
+
+  defp validate_option(:stream, value) when not is_binary(value) or value == "",
+    do: validation_error(:stream, "a non empty string", value)
+
+  defp validate_option(:heartbeat_time, value) when not is_integer(value) and value > 0,
+    do: validation_error(:heartbeat_time, "a positive integer", value)
+
+  defp validate_option(:receive_interval, value) when not is_integer(value) and value > 0,
+    do: validation_error(:receive_interval, "a positive integer", value)
+
+  defp validate_option(:allowed_missed_heartbeats, value)
+       when not is_integer(value) and value > 0,
+       do: validation_error(:allowed_missed_heartbeats, "a positive integer", value)
+
+  defp validate_option(_, _), do: :ok
+
+  defp validation_error(option, expected, value) do
+    {:error, "expected #{inspect(option)} to be #{expected}, got: #{inspect(value)}"}
   end
 end

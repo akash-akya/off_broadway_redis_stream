@@ -21,7 +21,7 @@ defmodule OffBroadwayRedisStream.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:broadway, git: "https://github.com/plataformatec/broadway.git"},
+      {:broadway, "~> 0.6.0"},
       {:redix, ">= 0.0.0"}
     ]
   end

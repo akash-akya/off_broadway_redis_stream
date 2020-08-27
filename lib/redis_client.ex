@@ -1,21 +1,30 @@
 defmodule OffBroadwayRedisStream.RedisClient do
   @moduledoc false
-  alias Broadway.Message
 
-  @type messages :: [Message.t()]
+  @type id :: String.t()
+  @type message :: [any()]
 
-  @type opts :: any
+  @callback init(config :: keyword) :: {:ok, any} | {:error, any}
 
-  @callback init(opts) :: {:ok, any} | {:error, any}
+  @callback fetch(
+              demand :: pos_integer,
+              last_id :: id,
+              config :: keyword
+            ) :: {:ok, messages :: [message()]} | {:error, any}
 
-  @callback receive_messages(demand :: pos_integer, opts) :: {messages, opts}
+  @callback consumers_info(config :: keyword) :: {:ok, any} | {:error, any}
 
-  @callback heartbeat(opts) :: {:ok, any} | {:error, any}
+  @callback pending(
+              consumer :: String.t(),
+              count :: pos_integer(),
+              config :: keyword
+            ) :: {:ok, any} | {:error, any}
 
-  @callback consumers_info(opts) :: {:ok, any} | {:error, any}
+  @callback claim(
+              idle :: pos_integer,
+              ids :: [id],
+              config :: keyword
+            ) :: {:ok, messages :: [message()]} | {:error, any}
 
-  @callback pending(opts, consumer :: String.t(), count :: pos_integer) ::
-              {:ok, any} | {:error, any}
-
-  @callback claim(opts, idle :: pos_integer, ids :: [String.t()]) :: {:ok, any} | {:error, any}
+  @callback ack(ids :: [id], config :: keyword) :: :ok | {:error, any}
 end

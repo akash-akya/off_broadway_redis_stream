@@ -3,13 +3,15 @@ defmodule OffBroadwayRedisStream.Heartbeat do
   use GenServer
   require Logger
 
-  def start_link(client, opts, heartbeat_time) do
-    GenServer.start_link(__MODULE__, {client, opts, heartbeat_time})
+  @max_id round(:math.pow(2, 64)) - 1
+
+  def start_link(client, config, heartbeat_time) do
+    GenServer.start_link(__MODULE__, {client, config, heartbeat_time})
   end
 
   @impl true
-  def init({client, opts, heartbeat_time}) do
-    state = %{client: client, opts: opts, heartbeat_time: heartbeat_time}
+  def init({client, config, heartbeat_time}) do
+    state = %{client: client, config: config, heartbeat_time: heartbeat_time}
     {:ok, state, {:continue, nil}}
   end
 
@@ -25,8 +27,13 @@ defmodule OffBroadwayRedisStream.Heartbeat do
     {:noreply, state}
   end
 
-  defp heartbeat(%{client: client, opts: opts, heartbeat_time: time}) do
-    :ok = client.heartbeat(opts)
+  defp heartbeat(%{client: client, config: config, heartbeat_time: time}) do
+    # we refresh consumer idle time by attempting to read non-existent entry
+    case client.fetch(1, @max_id, config) do
+      {:ok, []} -> :ok
+      {:error, error} -> raise "Heartbeat failed, " <> inspect(error)
+    end
+
     Process.send_after(self(), :heartbeat, time)
   end
 end

@@ -1,180 +1,75 @@
 defmodule OffBroadwayRedisStream.RedixClient do
   @moduledoc false
-
-  alias Broadway.{Message, Acknowledger}
   require Logger
 
   @behaviour OffBroadwayRedisStream.RedisClient
-  @behaviour Acknowledger
 
   @impl true
-  def init(opts) do
-    with :ok <- validate(opts) do
-      config = Map.new(opts)
-      ack_ref = Broadway.TermStorage.put(config)
-      {:ok, Map.merge(config, %{ack_ref: ack_ref, last_id: "0", min_idle_time: 30_000})}
-    end
-  end
+  def init(config) do
+    config =
+      Keyword.take(config, [:redis_instance, :stream, :group, :consumer_name])
+      |> Map.new()
 
-  @max_messages 1000
+    {:ok, config}
+  end
 
   @impl true
-  def receive_messages(demand, opts) do
-    {cmd, opts} = xreadgroup(min(demand, @max_messages), opts)
-    stream = opts.stream
+  def fetch(demand, last_id, config) do
+    %{stream: stream, group: group, consumer_name: consumer_name, redis_instance: pid} = config
 
-    messages =
-      case Redix.command(opts.redis_instance, cmd) do
-        {:ok, [[^stream, messages]]} ->
-          wrap_received_messages(messages, opts.ack_ref)
+    cmd =
+      ~w(XREADGROUP GROUP #{group} #{consumer_name} COUNT #{demand} STREAMS #{stream} #{last_id})
 
-        {:ok, nil} ->
-          []
-      end
-
-    {messages, opts}
-  end
-
-  @impl Acknowledger
-  def ack(ack_ref, successful, failed) do
-    opts = Broadway.TermStorage.get!(ack_ref)
-    ack_messages(successful ++ failed, opts, :successful)
-    :ok
-  end
-
-  @impl Acknowledger
-  def configure(_ack_ref, ack_data, options) do
-    ack_data = Map.merge(ack_data, Map.new(options))
-    {:ok, ack_data}
-  end
-
-  @max_id round(:math.pow(2, 64)) - 1
-
-  @impl true
-  def heartbeat(%{consumer_group: group, consumer_name: name, stream: stream} = opts) do
-    # we refresh idle time by attempting to read non-existent entry
-    cmd = ~w(XREADGROUP GROUP #{group} #{name} COUNT 1 STREAMS #{stream} #{@max_id})
-
-    case Redix.command(opts.redis_instance, cmd) do
-      {:ok, [[^stream, []]]} -> :ok
+    case Redix.command(pid, cmd) do
+      {:ok, [[^stream, messages]]} -> {:ok, messages}
+      {:ok, nil} -> {:ok, []}
       error -> error
     end
   end
 
   @impl true
-  def consumers_info(opts) do
-    cmd = ~w(XINFO consumers #{opts.stream} #{opts.consumer_group})
+  def consumers_info(config) do
+    %{stream: stream, group: group, redis_instance: pid} = config
+    cmd = ~w(XINFO consumers #{stream} #{group})
 
-    case Redix.command(opts.redis_instance, cmd) do
+    case Redix.command(pid, cmd) do
       {:ok, info} -> {:ok, to_map(info)}
       error -> error
     end
   end
 
   @impl true
-  def pending(opts, consumer, count) do
-    cmd = ~w(XPENDING #{opts.stream} #{opts.consumer_group} - + #{count} #{consumer})
+  def pending(consumer, count, config) do
+    %{stream: stream, group: group, redis_instance: pid} = config
+    cmd = ~w(XPENDING #{stream} #{group} - + #{count} #{consumer})
 
-    case Redix.command(opts.redis_instance, cmd) do
+    case Redix.command(pid, cmd) do
       {:ok, res} -> {:ok, res}
       error -> error
     end
   end
 
   @impl true
-  def claim(opts, idle, ids) do
-    cmd = ["XCLAIM", opts.stream, opts.consumer_group, opts.consumer_name, idle] ++ ids
+  def claim(idle, ids, config) do
+    %{stream: stream, group: group, consumer_name: consumer_name, redis_instance: pid} = config
+    cmd = ["XCLAIM", stream, group, consumer_name, idle] ++ ids
 
-    case Redix.command(opts.redis_instance, cmd) do
-      {:ok, nil} ->
-        {:ok, []}
-
-      {:ok, messages} ->
-        {:ok, wrap_received_messages(messages, opts.ack_ref)}
-
-      error ->
-        error
+    case Redix.command(pid, cmd) do
+      {:ok, nil} -> {:ok, []}
+      {:ok, messages} -> {:ok, messages}
+      error -> error
     end
   end
 
-  defp wrap_received_messages(messages, ack_ref) do
-    Enum.map(messages, fn message ->
-      acknowledger = build_acknowledger(message, ack_ref)
-      %Message{data: message, acknowledger: acknowledger}
-    end)
-  end
+  @impl true
+  def ack(ids, config) do
+    %{stream: stream, group: group, redis_instance: pid} = config
+    cmd = ["XACK", stream, group] ++ ids
 
-  defp build_acknowledger([id, _], ack_ref) do
-    {__MODULE__, ack_ref, %{receipt: %{id: id}}}
-  end
-
-  defp ack_messages([], _opts, _kind), do: :ok
-
-  defp ack_messages(messages, opts, _kind) do
-    messages
-    |> apply_ack_func(opts)
-    |> handle_acknowledged_messages()
-  end
-
-  defp apply_ack_func(messages, opts) do
-    ids = Enum.map(messages, &extract_message_id/1)
-    cmd = ["XACK", opts.stream, opts.consumer_group] ++ ids
-    Redix.command(opts.redis_instance, cmd)
-  end
-
-  defp extract_message_id(message) do
-    {_, _, %{receipt: %{id: id}}} = message.acknowledger
-    id
-  end
-
-  defp handle_acknowledged_messages({:ok, _}), do: :ok
-
-  defp handle_acknowledged_messages({:error, reason}) do
-    Logger.error("Unable to acknowledge messages with Redis. Reason: #{inspect(reason)}")
-    :ok
-  end
-
-  defp xreadgroup(count, opts) do
-    cmd = [
-      "XREADGROUP",
-      "GROUP",
-      opts.consumer_group,
-      opts.consumer_name,
-      "COUNT",
-      count,
-      "STREAMS",
-      opts.stream,
-      opts.last_id
-    ]
-
-    {cmd, %{opts | last_id: ">"}}
-  end
-
-  defp validate(opts) when is_list(opts) do
-    with :ok <- validate_option(:redis_instance, opts[:redis_instance]),
-         :ok <- validate_option(:stream, opts[:stream]),
-         :ok <- validate_option(:consumer_group, opts[:consumer_group]),
-         :ok <- validate_option(:consumer_name, opts[:consumer_name]) do
-      :ok
+    case Redix.command(pid, cmd) do
+      {:ok, _} -> :ok
+      error -> error
     end
-  end
-
-  defp validate_option(:redis_instance, value) when not is_atom(value) or is_nil(value),
-    do: validation_error(:redis_instance, "an atom", value)
-
-  defp validate_option(:consumer_group, value) when not is_binary(value) or value == "",
-    do: validation_error(:consumer_group, "a non empty string", value)
-
-  defp validate_option(:consumer_name, value) when not is_binary(value) or value == "",
-    do: validation_error(:consumer_name, "a non empty string", value)
-
-  defp validate_option(:stream, value) when not is_binary(value) or value == "",
-    do: validation_error(:stream, "a non empty string", value)
-
-  defp validate_option(_, _), do: :ok
-
-  defp validation_error(option, expected, value) do
-    {:error, "expected #{inspect(option)} to be #{expected}, got: #{inspect(value)}"}
   end
 
   defp to_map(info), do: to_map(info, [])
