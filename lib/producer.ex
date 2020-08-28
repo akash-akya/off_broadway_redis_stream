@@ -282,7 +282,7 @@ defmodule OffBroadwayRedisStream.Producer do
       ack_data = %{id: id}
       ack_ref = {self(), {stream, group}}
 
-      %Message{data: data, acknowledger: {Acknowledger, ack_ref, ack_data}}
+      %Message{data: data, metadata: %{id: id}, acknowledger: {Acknowledger, ack_ref, ack_data}}
     end)
   end
 

@@ -6,6 +6,7 @@ defmodule OffBroadwayRedisStream.MixProject do
       app: :off_broadway_redis_stream,
       version: "0.1.0",
       elixir: "~> 1.7",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -25,4 +26,7 @@ defmodule OffBroadwayRedisStream.MixProject do
       {:redix, ">= 0.0.0"}
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 end
