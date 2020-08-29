@@ -6,11 +6,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def init(config) do
-    config =
-      Keyword.take(config, [:redis_instance, :stream, :group, :consumer_name])
-      |> Map.new()
-
-    {:ok, config}
+    {:ok, Map.new(config)}
   end
 
   @impl true
