@@ -1,0 +1,29 @@
+name: Elixir CI
+on: push
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    strategy:
+      matrix:
+        otp: [22.2, 23]
+        elixir: [1.9.4]
+    steps:
+      - uses: actions/setup-elixir@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
+      - name: Start Redis
+        uses: supercharge/redis-github-action@1.1.0
+        with:
+          redis-version: 6
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install Dependencies
+        run: mix deps.get
+      - name: Compile
+        run: mix compile --force --warnings-as-errors
+      - name: Check format
+        run: mix format --check-formatted
+      - name: Run Tests
+        run: mix test
