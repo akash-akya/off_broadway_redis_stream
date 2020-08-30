@@ -6,7 +6,11 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def init(config) do
-    {:ok, Map.new(config)}
+    config = Map.new(config)
+
+    with :ok <- check_redis_version(config) do
+      {:ok, config}
+    end
   end
 
   @impl true
@@ -87,4 +91,28 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   defp to_map(info, _acc), do: info
+
+  defp check_redis_version(config) do
+    with {:ok, info} <- info(config) do
+      if Version.compare(info["redis_version"], "6.0.0") in [:gt, :eq] do
+        :ok
+      else
+        {:error, "only supports Redis version >= 6"}
+      end
+    end
+  end
+
+  defp info(config) do
+    with {:ok, info} <- Redix.command(config.redis_instance, ~w(INFO server)) do
+      info =
+        String.split(info, "\n", trim: true)
+        |> Enum.reject(&String.starts_with?(&1, "#"))
+        |> Map.new(fn entry ->
+          [key, value] = String.split(entry, ":", parts: 2, trim: true)
+          {key, String.trim(value)}
+        end)
+
+      {:ok, info}
+    end
+  end
 end
