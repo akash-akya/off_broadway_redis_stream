@@ -2,6 +2,7 @@ defmodule OffBroadwayRedisStream.Heartbeat do
   @moduledoc false
   use GenServer
   require Logger
+  alias OffBroadwayRedisStream.RedisClient
 
   @max_id round(:math.pow(2, 64)) - 1
 
@@ -27,13 +28,28 @@ defmodule OffBroadwayRedisStream.Heartbeat do
     {:noreply, state}
   end
 
-  defp heartbeat(%{client: client, config: config, heartbeat_time: time}) do
+  @redis_command_retry_timeout 500
+  @max_retries 2
+
+  defp heartbeat(
+         %{client: client, config: config, heartbeat_time: time} = state,
+         retry_count \\ 0
+       ) do
     # we refresh consumer idle time by attempting to read non-existent entry
     case client.fetch(1, @max_id, config) do
-      {:ok, []} -> :ok
-      {:error, error} -> raise "Heartbeat failed, " <> inspect(error)
-    end
+      {:ok, []} ->
+        Process.send_after(self(), :heartbeat, time)
 
-    Process.send_after(self(), :heartbeat, time)
+      {:error, %RedisClient.ConnectionError{} = error} when retry_count < @max_retries ->
+        Logger.warn(
+          "Failed to send heartbeat, retry_count: #{retry_count}, reason: #{inspect(error.reason)}"
+        )
+
+        Process.sleep(@redis_command_retry_timeout * (retry_count + 1))
+        heartbeat(state, retry_count + 1)
+
+      {:error, error} ->
+        raise "Heartbeat failed, " <> inspect(error)
+    end
   end
 end

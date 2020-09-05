@@ -38,6 +38,7 @@ defmodule OffBroadwayRedisStream.Producer do
   alias Broadway.Message
   alias OffBroadwayRedisStream.Acknowledger
   alias OffBroadwayRedisStream.Heartbeat
+  alias OffBroadwayRedisStream.RedisClient
   require Logger
 
   @behaviour Producer
@@ -46,7 +47,9 @@ defmodule OffBroadwayRedisStream.Producer do
     heartbeat_time: 5000,
     receive_interval: 2000,
     client: OffBroadwayRedisStream.RedixClient,
-    allowed_missed_heartbeats: 4
+    allowed_missed_heartbeats: 4,
+    max_pending_ack: 1000,
+    redis_command_retry_timeout: 500
   ]
 
   @impl GenStage
@@ -70,7 +73,8 @@ defmodule OffBroadwayRedisStream.Producer do
             redis_config: redis_config,
             receive_timer: nil,
             last_id: "0",
-            last_checked: 0
+            last_checked: 0,
+            pending_ack: []
           })
 
         {:producer, state}
@@ -94,8 +98,21 @@ defmodule OffBroadwayRedisStream.Producer do
 
   @impl GenStage
   def handle_info({:ack, ids}, state) do
-    ack_ids(state, ids)
-    {:noreply, [], state}
+    ids = state.pending_ack ++ ids
+
+    case redis_cmd(:ack, [ids], state, 0) do
+      :ok ->
+        {:noreply, [], %{state | pending_ack: []}}
+
+      {:error, error} ->
+        Logger.warn("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
+
+        if length(ids) > state.max_pending_ack do
+          {:stop, "Pending ack count is more than maximum limit #{state.max_pending_ack}", state}
+        else
+          {:noreply, [], %{state | pending_ack: ids}}
+        end
+    end
   end
 
   @impl GenStage
@@ -158,7 +175,7 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp claim_dead_consumer_messages(state, acc \\ []) do
-    {:ok, consumers} = consumers_info(state)
+    {:ok, consumers} = redis_cmd(:consumers_info, [], state)
     expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
 
     {status, messages} =
@@ -207,12 +224,12 @@ defmodule OffBroadwayRedisStream.Producer do
     )
   end
 
-  defp claim_consumer(%{redis_client: client, redis_config: redis_config}, consumer, demand) do
+  defp claim_consumer(state, consumer, demand) do
     count = min(consumer["pending"], demand)
 
-    {:ok, pending_messages} = client.pending(consumer["name"], count, redis_config)
+    {:ok, pending_messages} = redis_cmd(:pending, [consumer["name"], count], state)
     ids = Enum.map(pending_messages, &Enum.at(&1, 0))
-    {:ok, messages} = client.claim(consumer["idle"], ids, redis_config)
+    {:ok, messages} = redis_cmd(:claim, [consumer["idle"], ids], state)
 
     received = length(messages)
 
@@ -237,8 +254,6 @@ defmodule OffBroadwayRedisStream.Producer do
   defp fetch_messages_from_redis(state) do
     %{
       demand: demand,
-      redis_client: client,
-      redis_config: redis_config,
       stream: stream,
       group: group,
       consumer_name: consumer_name,
@@ -247,7 +262,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
     count = min(demand, @max_messages)
 
-    case client.fetch(count, last_id, redis_config) do
+    case redis_cmd(:fetch, [count, last_id], state) do
       {:ok, []} ->
         {[], ">"}
 
@@ -273,10 +288,6 @@ defmodule OffBroadwayRedisStream.Producer do
     end
   end
 
-  defp consumers_info(%{redis_client: client, redis_config: redis_config}) do
-    client.consumers_info(redis_config)
-  end
-
   defp wrap_messages(redis_messages, stream, group) do
     Enum.map(redis_messages, fn [id, _] = data ->
       ack_data = %{id: id}
@@ -286,15 +297,21 @@ defmodule OffBroadwayRedisStream.Producer do
     end)
   end
 
-  defp ack_ids(state, ids) do
+  @max_retries 2
+  defp redis_cmd(func, args, state, max_retries \\ @max_retries, retry_count \\ 0) do
     %{redis_client: client, redis_config: redis_config} = state
 
-    case client.ack(ids, redis_config) do
-      :ok ->
-        :ok
+    case apply(client, func, args ++ [redis_config]) do
+      {:error, %RedisClient.ConnectionError{} = error} when retry_count < max_retries ->
+        Logger.warn(
+          "Failed to run #{func}, retry_count: #{retry_count}, reason: #{inspect(error.reason)}"
+        )
 
-      error ->
-        Logger.error("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
+        Process.sleep(state.redis_command_retry_timeout * (retry_count + 1))
+        redis_cmd(func, args, state, max_retries, retry_count + 1)
+
+      result ->
+        result
     end
   end
 
@@ -338,6 +355,10 @@ defmodule OffBroadwayRedisStream.Producer do
   defp validate_option(:allowed_missed_heartbeats, value)
        when not is_integer(value) and value > 0,
        do: validation_error(:allowed_missed_heartbeats, "a positive integer", value)
+
+  defp validate_option(:redis_command_retry_timeout, value)
+       when not is_integer(value) and value > 0,
+       do: validation_error(:redis_command_retry_timeout, "a positive integer", value)
 
   defp validate_option(_, _), do: :ok
 

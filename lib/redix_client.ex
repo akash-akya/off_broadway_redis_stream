@@ -20,10 +20,10 @@ defmodule OffBroadwayRedisStream.RedixClient do
     cmd =
       ~w(XREADGROUP GROUP #{group} #{consumer_name} COUNT #{demand} STREAMS #{stream} #{last_id})
 
-    case Redix.command(pid, cmd) do
+    case command(pid, cmd) do
       {:ok, [[^stream, messages]]} -> {:ok, messages}
       {:ok, nil} -> {:ok, []}
-      error -> error
+      result -> result
     end
   end
 
@@ -32,9 +32,9 @@ defmodule OffBroadwayRedisStream.RedixClient do
     %{stream: stream, group: group, redis_instance: pid} = config
     cmd = ~w(XINFO consumers #{stream} #{group})
 
-    case Redix.command(pid, cmd) do
+    case command(pid, cmd) do
       {:ok, info} -> {:ok, to_map(info)}
-      error -> error
+      result -> result
     end
   end
 
@@ -42,11 +42,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
   def pending(consumer, count, config) do
     %{stream: stream, group: group, redis_instance: pid} = config
     cmd = ~w(XPENDING #{stream} #{group} - + #{count} #{consumer})
-
-    case Redix.command(pid, cmd) do
-      {:ok, res} -> {:ok, res}
-      error -> error
-    end
+    command(pid, cmd)
   end
 
   @impl true
@@ -54,10 +50,9 @@ defmodule OffBroadwayRedisStream.RedixClient do
     %{stream: stream, group: group, consumer_name: consumer_name, redis_instance: pid} = config
     cmd = ["XCLAIM", stream, group, consumer_name, idle] ++ ids
 
-    case Redix.command(pid, cmd) do
+    case command(pid, cmd) do
       {:ok, nil} -> {:ok, []}
-      {:ok, messages} -> {:ok, messages}
-      error -> error
+      result -> result
     end
   end
 
@@ -66,9 +61,19 @@ defmodule OffBroadwayRedisStream.RedixClient do
     %{stream: stream, group: group, redis_instance: pid} = config
     cmd = ["XACK", stream, group] ++ ids
 
-    case Redix.command(pid, cmd) do
+    case command(pid, cmd) do
       {:ok, _} -> :ok
-      error -> error
+      result -> result
+    end
+  end
+
+  defp command(pid, cmd) do
+    case Redix.command(pid, cmd) do
+      {:error, %Redix.ConnectionError{reason: reason}} ->
+        {:error, %OffBroadwayRedisStream.RedisClient.ConnectionError{reason: reason}}
+
+      result ->
+        result
     end
   end
 
@@ -103,7 +108,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   defp info(config) do
-    with {:ok, info} <- Redix.command(config.redis_instance, ~w(INFO server)) do
+    with {:ok, info} <- command(config.redis_instance, ~w(INFO server)) do
       info =
         String.split(info, "\n", trim: true)
         |> Enum.reject(&String.starts_with?(&1, "#"))

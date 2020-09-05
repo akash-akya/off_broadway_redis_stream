@@ -1,7 +1,9 @@
 defmodule OffBroadwayRedisStream.ProducerTest do
   use ExUnit.Case
   alias RedisHelper
+  alias OffBroadwayRedisStream.RedisClient
   alias OffBroadwayRedisStream.RedisMock
+  import Mox
 
   defmodule Forwarder do
     use Broadway
@@ -24,14 +26,27 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     end
   end
 
-  setup do
-    on_exit(fn ->
-      RedisHelper.flushall(:redix)
-    end)
-  end
+  setup :set_mox_from_context
+  setup :verify_on_exit!
 
   @group "test-group"
   @stream "test"
+  @redis_client RedisTestClient
+
+  setup_all do
+    {:ok, _} = Redix.start_link(host: host(), port: port(), name: :redix)
+    :ok
+  end
+
+  setup do
+    stub_with(@redis_client, OffBroadwayRedisStream.RedisMock)
+
+    on_exit(fn ->
+      RedisHelper.flushall(:redix)
+    end)
+
+    :ok
+  end
 
   test "message" do
     RedisHelper.create_stream(:redix, @stream, @group)
@@ -137,6 +152,64 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     stop_broadway(pid2)
   end
 
+  test "ack failures" do
+    consumer = "test-cosnumer-1"
+    Process.flag(:trap_exit, true)
+
+    RedisHelper.create_stream(:redix, @stream, @group)
+    push_messages(:redix, @stream, 1..20)
+
+    {:ok, pid} =
+      start_broadway(@stream,
+        group: @group,
+        consumer_name: consumer,
+        redis_command_retry_timeout: 1
+      )
+
+    @redis_client
+    |> expect(:ack, 2, fn _, _ -> {:error, %RedisClient.ConnectionError{reason: :closed}} end)
+    |> expect(:ack, 2, &RedisMock.ack/2)
+
+    Process.sleep(50)
+
+    stop_broadway(pid)
+    assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
+  end
+
+  test "fetch retry on redis connection failure" do
+    consumer = "test-cosnumer-1"
+    Process.flag(:trap_exit, true)
+
+    RedisHelper.create_stream(:redix, @stream, @group)
+    push_messages(:redix, @stream, 1..5)
+
+    {:ok, pid} =
+      start_broadway(@stream,
+        group: @group,
+        consumer_name: consumer,
+        redis_command_retry_timeout: 1
+      )
+
+    {:ok, toggle} = Agent.start(fn -> :off end)
+
+    @redis_client
+    |> stub(:fetch, fn demand, last_id, config ->
+      # if demand is 1 then its heartbeat request, skip that
+      if demand > 1 && Agent.get(toggle, & &1) == :off do
+        Agent.update(toggle, fn _ -> :on end)
+        {:error, %RedisClient.ConnectionError{reason: :closed}}
+      else
+        OffBroadwayRedisStream.RedixClient.fetch(demand, last_id, config)
+      end
+    end)
+
+    Process.sleep(50)
+    stop_broadway(pid)
+
+    assert_receive {:message_handled, %{data: _}}
+    assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
+  end
+
   defp push_messages(pid, stream, ids) do
     for id <- ids do
       RedisHelper.xadd(pid, stream, to_string(id), foo: "bar-#{id}")
@@ -150,6 +223,8 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     group = Keyword.get(opts, :group, "test-group")
     consumer_name = Keyword.get(opts, :consumer_name, "test")
     test_sleep_duration = Keyword.get(opts, :test_sleep_duration, 0)
+    redis_instance = Keyword.get(opts, :redis_instance, :redix)
+    redis_command_retry_timeout = Keyword.get(opts, :redis_command_retry_timeout, 5)
 
     batchers =
       if batchers_concurrency do
@@ -166,15 +241,16 @@ defmodule OffBroadwayRedisStream.ProducerTest do
           module:
             {OffBroadwayRedisStream.Producer,
              [
-               redis_instance: :redix,
-               client: RedisMock,
+               redis_instance: redis_instance,
+               client: @redis_client,
                test_pid: self(),
                stream: stream,
                consumer_name: consumer_name,
                group: group,
                receive_interval: 0,
                heartbeat_time: 100,
-               allowed_missed_heartbeats: 2
+               allowed_missed_heartbeats: 2,
+               redis_command_retry_timeout: redis_command_retry_timeout
              ]},
           concurrency: producers_concurrency
         ],
@@ -218,6 +294,19 @@ defmodule OffBroadwayRedisStream.ProducerTest do
 
     receive do
       {:DOWN, ^ref, _, _, _} -> :ok
+    end
+  end
+
+  defp host do
+    System.get_env("REDIS_HOST") || "localhost"
+  end
+
+  defp port do
+    if p = System.get_env("REDIS_PORT") do
+      {port, ""} = Integer.parse(p)
+      port
+    else
+      6379
     end
   end
 end
