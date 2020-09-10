@@ -28,6 +28,11 @@ defmodule OffBroadwayRedisStream.RedisMock do
   end
 
   @impl true
+  def create_group(offset, config) do
+    Super.create_group(offset, config)
+  end
+
+  @impl true
   def pending(consumer, count, config) do
     {:ok, ids} = Super.pending(consumer, count, config)
     send(config[:test_pid], {:pending, ids})

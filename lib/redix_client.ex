@@ -39,6 +39,18 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   @impl true
+  def create_group(id, config) do
+    %{stream: stream, group: group, redis_instance: pid} = config
+    cmd = ~w(XGROUP CREATE #{stream} #{group} #{id})
+
+    case command(pid, cmd) do
+      {:ok, _} -> :ok
+      {:error, %Redix.Error{message: "BUSYGROUP Consumer Group name already exists"}} -> :ok
+      result -> result
+    end
+  end
+
+  @impl true
   def pending(consumer, count, config) do
     %{stream: stream, group: group, redis_instance: pid} = config
     cmd = ~w(XPENDING #{stream} #{group} - + #{count} #{consumer})

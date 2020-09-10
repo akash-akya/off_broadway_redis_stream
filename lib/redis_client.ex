@@ -21,6 +21,9 @@ defmodule OffBroadwayRedisStream.RedisClient do
   @callback consumers_info(config :: keyword) ::
               {:ok, any} | {:error, ConnectionError.t()} | {:error, any}
 
+  @callback create_group(offset :: String.t(), config :: keyword) ::
+              :ok | {:error, ConnectionError.t()} | {:error, any}
+
   @callback pending(
               consumer :: String.t(),
               count :: pos_integer(),

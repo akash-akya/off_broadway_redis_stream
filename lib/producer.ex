@@ -16,9 +16,11 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:stream` - Required. Redis stream name
 
-    * `:group` - Required. Redis consumer group
+    * `:group` - Required. Redis consumer group. Group will be created with `:group_start_id` ID if it is not already present.
 
     * `:consumer_name` - Required. Redis Consumer name for the producer
+
+    * `:group_start_id` - Optional. Starting stream ID which should be used when consumer group *created*. Use $ for latest ID. see [XGROUP CREATE](https://redis.io/commands/xgroup). Default is `$`
 
     * `:heartbeat_time` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
 
@@ -49,7 +51,8 @@ defmodule OffBroadwayRedisStream.Producer do
     client: OffBroadwayRedisStream.RedixClient,
     allowed_missed_heartbeats: 4,
     max_pending_ack: 1000,
-    redis_command_retry_timeout: 500
+    redis_command_retry_timeout: 500,
+    group_start_id: "$"
   ]
 
   @impl GenStage
@@ -63,6 +66,7 @@ defmodule OffBroadwayRedisStream.Producer do
         raise ArgumentError, "invalid options given to #{inspect(client)}.init/1, " <> message
 
       {:ok, redis_config} ->
+        init_consumer_group!(client, opts[:group_start_id], redis_config)
         {:ok, _} = Heartbeat.start_link(client, redis_config, opts[:heartbeat_time])
 
         state =
@@ -315,6 +319,10 @@ defmodule OffBroadwayRedisStream.Producer do
     end
   end
 
+  defp init_consumer_group!(client, group_start_id, redis_config) do
+    :ok = client.create_group(group_start_id, redis_config)
+  end
+
   defp validate!(opts) do
     case validate(opts) do
       :ok -> :ok
@@ -346,11 +354,14 @@ defmodule OffBroadwayRedisStream.Producer do
   defp validate_option(:stream, value) when not is_binary(value) or value == "",
     do: validation_error(:stream, "a non empty string", value)
 
-  defp validate_option(:heartbeat_time, value) when not is_integer(value) and value > 0,
+  defp validate_option(:heartbeat_time, value) when not is_integer(value) or value < 0,
     do: validation_error(:heartbeat_time, "a positive integer", value)
 
-  defp validate_option(:receive_interval, value) when not is_integer(value) and value > 0,
+  defp validate_option(:receive_interval, value) when not is_integer(value) or value < 0,
     do: validation_error(:receive_interval, "a positive integer", value)
+
+  defp validate_option(:group_start_id, value) when not is_binary(value),
+    do: validation_error(:group_start_id, "a redis stream id or $", value)
 
   defp validate_option(:allowed_missed_heartbeats, value)
        when not is_integer(value) and value > 0,
