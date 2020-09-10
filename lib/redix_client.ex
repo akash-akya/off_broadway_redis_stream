@@ -6,16 +6,17 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def init(config) do
-    config = Map.new(config)
-
-    with :ok <- check_redis_version(config) do
+    with :ok <- validate_redix_opts(config[:redis_client_opts]),
+         {:ok, pid} <- Redix.start_link(config[:redis_client_opts]),
+         config <- Map.put(Map.new(config), :redix_pid, pid),
+         :ok <- check_redis_version(config) do
       {:ok, config}
     end
   end
 
   @impl true
   def fetch(demand, last_id, config) do
-    %{stream: stream, group: group, consumer_name: consumer_name, redis_instance: pid} = config
+    %{stream: stream, group: group, consumer_name: consumer_name, redix_pid: pid} = config
 
     cmd =
       ~w(XREADGROUP GROUP #{group} #{consumer_name} COUNT #{demand} STREAMS #{stream} #{last_id})
@@ -29,7 +30,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def consumers_info(config) do
-    %{stream: stream, group: group, redis_instance: pid} = config
+    %{stream: stream, group: group, redix_pid: pid} = config
     cmd = ~w(XINFO consumers #{stream} #{group})
 
     case command(pid, cmd) do
@@ -40,7 +41,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def create_group(id, config) do
-    %{stream: stream, group: group, redis_instance: pid} = config
+    %{stream: stream, group: group, redix_pid: pid} = config
     cmd = ~w(XGROUP CREATE #{stream} #{group} #{id})
 
     case command(pid, cmd) do
@@ -52,14 +53,14 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def pending(consumer, count, config) do
-    %{stream: stream, group: group, redis_instance: pid} = config
+    %{stream: stream, group: group, redix_pid: pid} = config
     cmd = ~w(XPENDING #{stream} #{group} - + #{count} #{consumer})
     command(pid, cmd)
   end
 
   @impl true
   def claim(idle, ids, config) do
-    %{stream: stream, group: group, consumer_name: consumer_name, redis_instance: pid} = config
+    %{stream: stream, group: group, consumer_name: consumer_name, redix_pid: pid} = config
     cmd = ["XCLAIM", stream, group, consumer_name, idle] ++ ids
 
     case command(pid, cmd) do
@@ -70,7 +71,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def ack(ids, config) do
-    %{stream: stream, group: group, redis_instance: pid} = config
+    %{stream: stream, group: group, redix_pid: pid} = config
     cmd = ["XACK", stream, group] ++ ids
 
     case command(pid, cmd) do
@@ -120,7 +121,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   defp info(config) do
-    with {:ok, info} <- command(config.redis_instance, ~w(INFO server)) do
+    with {:ok, info} <- command(config.redix_pid, ~w(INFO server)) do
       info =
         String.split(info, "\n", trim: true)
         |> Enum.reject(&String.starts_with?(&1, "#"))
@@ -132,4 +133,10 @@ defmodule OffBroadwayRedisStream.RedixClient do
       {:ok, info}
     end
   end
+
+  defp validate_redix_opts(nil),
+    do:
+      {:error, "invalid :redis_client_opts opts for Redix, see Redix.start_link/1 documentation"}
+
+  defp validate_redix_opts(_), do: :ok
 end

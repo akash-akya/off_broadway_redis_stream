@@ -9,7 +9,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
   ## Producer Options
 
-    * `:redis_instance` - Required. Redix instance must started separately and name of that instance needs to be passed. For more infromation see [Redix Documentation](https://hexdocs.pm/redix/Redix.html#start_link/1)
+    * `:redis_client_opts` - Required. Redis client specific options. Default client is [Redix](https://hexdocs.pm/redix/Redix.html) and for Redix this is used to start redix process `Redix.start_link(opts)`. see [Redix Documentation](https://hexdocs.pm/redix/Redix.html#start_link/1)
 
     * `:receive_interval` - Optional. The duration (in milliseconds) for which the producer
       waits before making a request for more messages if there are no events in stream. Default is 2000.
@@ -331,8 +331,7 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp validate(opts) when is_list(opts) do
-    with :ok <- validate_option(:redis_instance, opts[:redis_instance]),
-         :ok <- validate_option(:stream, opts[:stream]),
+    with :ok <- validate_option(:stream, opts[:stream]),
          :ok <- validate_option(:group, opts[:group]),
          :ok <- validate_option(:consumer_name, opts[:consumer_name]),
          :ok <- validate_option(:receive_interval, opts[:receive_interval]),
@@ -341,9 +340,6 @@ defmodule OffBroadwayRedisStream.Producer do
       :ok
     end
   end
-
-  defp validate_option(:redis_instance, value) when not is_atom(value) or is_nil(value),
-    do: validation_error(:redis_instance, "an atom", value)
 
   defp validate_option(:group, value) when not is_binary(value) or value == "",
     do: validation_error(:group, "a non empty string", value)

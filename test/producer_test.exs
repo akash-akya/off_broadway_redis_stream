@@ -223,7 +223,6 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     group = Keyword.get(opts, :group, "test-group")
     consumer_name = Keyword.get(opts, :consumer_name, "test")
     test_sleep_duration = Keyword.get(opts, :test_sleep_duration, 0)
-    redis_instance = Keyword.get(opts, :redis_instance, :redix)
     redis_command_retry_timeout = Keyword.get(opts, :redis_command_retry_timeout, 5)
 
     batchers =
@@ -241,7 +240,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
           module:
             {OffBroadwayRedisStream.Producer,
              [
-               redis_instance: redis_instance,
+               redis_client_opts: redix_opts(),
                client: @redis_client,
                test_pid: self(),
                stream: stream,
@@ -296,6 +295,8 @@ defmodule OffBroadwayRedisStream.ProducerTest do
       {:DOWN, ^ref, _, _, _} -> :ok
     end
   end
+
+  defp redix_opts, do: [host: host(), port: port()]
 
   defp host do
     System.get_env("REDIS_HOST") || "localhost"
