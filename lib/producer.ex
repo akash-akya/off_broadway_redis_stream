@@ -182,10 +182,10 @@ defmodule OffBroadwayRedisStream.Producer do
     {:ok, consumers} = redis_cmd(:consumers_info, [], state)
     expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
 
-    {status, messages} =
-      consumers
-      |> dead_consumers(expire_time)
-      |> claim_consumers(state)
+    {dead_without_pending, dead_with_pending} = dead_consumers(consumers, expire_time)
+    prune_consumers(dead_without_pending, state)
+
+    {status, messages} = claim_consumers(dead_with_pending, state)
 
     messages = acc ++ messages
     state = %{state | demand: state.demand - length(messages)}
@@ -199,9 +199,17 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp dead_consumers(consumers, expire_time) do
     consumers
-    |> Enum.filter(fn consumer ->
-      consumer["pending"] > 0 && consumer["idle"] > expire_time
-    end)
+    |> Enum.filter(&(&1["idle"] > expire_time))
+    |> Enum.reduce(
+      {[], []},
+      fn
+        %{"pending" => 0} = consumer, {without_pending, with_pending} ->
+          {[consumer | without_pending], with_pending}
+
+        consumer, {without_pending, with_pending} ->
+          {without_pending, [consumer | with_pending]}
+      end
+    )
   end
 
   defp claim_consumers(consumers, state) do
@@ -321,6 +329,14 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp init_consumer_group!(client, group_start_id, redis_config) do
     :ok = client.create_group(group_start_id, redis_config)
+  end
+
+  defp prune_consumers([], _state), do: :ok
+
+  defp prune_consumers(consumers, state) do
+    %{redis_client: client, redis_config: redis_config} = state
+    names = Enum.map(consumers, & &1["name"])
+    _ = client.delete_consumers(names, redis_config)
   end
 
   defp validate!(opts) do

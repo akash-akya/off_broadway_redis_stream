@@ -74,8 +74,19 @@ defmodule OffBroadwayRedisStream.RedixClient do
     %{stream: stream, group: group, redix_pid: pid} = config
     cmd = ["XACK", stream, group] ++ ids
 
-    case command(pid, cmd) do
-      {:ok, _} -> :ok
+    case Redix.noreply_command(pid, cmd) do
+      :ok -> :ok
+      result -> result
+    end
+  end
+
+  @impl true
+  def delete_consumers(consumers, config) do
+    %{stream: stream, group: group, redix_pid: pid} = config
+    commands = Enum.map(consumers, &["XGROUP", "DELCONSUMER", stream, group, &1])
+
+    case Redix.noreply_pipeline(pid, commands) do
+      :ok -> :ok
       result -> result
     end
   end
