@@ -247,7 +247,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
                consumer_name: consumer_name,
                group: group,
                receive_interval: 0,
-               heartbeat_time: 100,
+               heartbeat_interval: 100,
                allowed_missed_heartbeats: 2,
                redis_command_retry_timeout: redis_command_retry_timeout
              ]},

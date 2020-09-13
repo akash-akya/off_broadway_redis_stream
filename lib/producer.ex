@@ -22,7 +22,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:group_start_id` - Optional. Starting stream ID which should be used when consumer group *created*. Use $ for latest ID. see [XGROUP CREATE](https://redis.io/commands/xgroup). Default is `$`
 
-    * `:heartbeat_time` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
+    * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
 
     * `:allowed_missed_heartbeats` - Optional. Missed heartbeats allowed, after this that consumer is considered to be dead and other consumers claim its pending events. Default is 4
 
@@ -46,7 +46,7 @@ defmodule OffBroadwayRedisStream.Producer do
   @behaviour Producer
 
   @default_opts [
-    heartbeat_time: 5000,
+    heartbeat_interval: 5000,
     receive_interval: 2000,
     client: OffBroadwayRedisStream.RedixClient,
     allowed_missed_heartbeats: 4,
@@ -67,7 +67,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
       {:ok, redis_config} ->
         init_consumer_group!(client, opts[:group_start_id], redis_config)
-        {:ok, _} = Heartbeat.start_link(client, redis_config, opts[:heartbeat_time])
+        {:ok, _} = Heartbeat.start_link(client, redis_config, opts[:heartbeat_interval])
 
         state =
           Map.new(opts)
@@ -161,7 +161,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp maybe_claim_dead_consumer_messages(state) do
     now = DateTime.utc_now() |> DateTime.to_unix(:millisecond)
-    expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
+    expire_time = state.allowed_missed_heartbeats * state.heartbeat_interval
     last_checked = state.last_checked
 
     if now - last_checked > expire_time do
@@ -180,7 +180,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp claim_dead_consumer_messages(state, acc \\ []) do
     {:ok, consumers} = redis_cmd(:consumers_info, [], state)
-    expire_time = state.allowed_missed_heartbeats * state.heartbeat_time
+    expire_time = state.allowed_missed_heartbeats * state.heartbeat_interval
 
     {dead_without_pending, dead_with_pending} = dead_consumers(consumers, expire_time)
     prune_consumers(dead_without_pending, state)
@@ -352,7 +352,7 @@ defmodule OffBroadwayRedisStream.Producer do
          :ok <- validate_option(:consumer_name, opts[:consumer_name]),
          :ok <- validate_option(:receive_interval, opts[:receive_interval]),
          :ok <- validate_option(:allowed_missed_heartbeats, opts[:allowed_missed_heartbeats]),
-         :ok <- validate_option(:heartbeat_time, opts[:heartbeat_time]) do
+         :ok <- validate_option(:heartbeat_interval, opts[:heartbeat_interval]) do
       :ok
     end
   end
@@ -366,8 +366,8 @@ defmodule OffBroadwayRedisStream.Producer do
   defp validate_option(:stream, value) when not is_binary(value) or value == "",
     do: validation_error(:stream, "a non empty string", value)
 
-  defp validate_option(:heartbeat_time, value) when not is_integer(value) or value < 0,
-    do: validation_error(:heartbeat_time, "a positive integer", value)
+  defp validate_option(:heartbeat_interval, value) when not is_integer(value) or value < 0,
+    do: validation_error(:heartbeat_interval, "a positive integer", value)
 
   defp validate_option(:receive_interval, value) when not is_integer(value) or value < 0,
     do: validation_error(:receive_interval, "a positive integer", value)

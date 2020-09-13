@@ -6,13 +6,13 @@ defmodule OffBroadwayRedisStream.Heartbeat do
 
   @max_id round(:math.pow(2, 64)) - 1
 
-  def start_link(client, config, heartbeat_time) do
-    GenServer.start_link(__MODULE__, {client, config, heartbeat_time})
+  def start_link(client, config, heartbeat_interval) do
+    GenServer.start_link(__MODULE__, {client, config, heartbeat_interval})
   end
 
   @impl true
-  def init({client, config, heartbeat_time}) do
-    state = %{client: client, config: config, heartbeat_time: heartbeat_time}
+  def init({client, config, heartbeat_interval}) do
+    state = %{client: client, config: config, heartbeat_interval: heartbeat_interval}
     {:ok, state, {:continue, nil}}
   end
 
@@ -32,13 +32,13 @@ defmodule OffBroadwayRedisStream.Heartbeat do
   @max_retries 2
 
   defp heartbeat(
-         %{client: client, config: config, heartbeat_time: time} = state,
+         %{client: client, config: config, heartbeat_interval: interval} = state,
          retry_count \\ 0
        ) do
     # we refresh consumer idle time by attempting to read non-existent entry
     case client.fetch(1, @max_id, config) do
       {:ok, []} ->
-        Process.send_after(self(), :heartbeat, time)
+        Process.send_after(self(), :heartbeat, interval)
 
       {:error, %RedisClient.ConnectionError{} = error} when retry_count < @max_retries ->
         Logger.warn(
