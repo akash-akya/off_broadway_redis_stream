@@ -70,6 +70,8 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   @impl true
+  def ack([], _config), do: :ok
+
   def ack(ids, config) do
     %{stream: stream, group: group, redix_pid: pid} = config
     cmd = ["XACK", stream, group] ++ ids

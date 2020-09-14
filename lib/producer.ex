@@ -67,7 +67,9 @@ defmodule OffBroadwayRedisStream.Producer do
 
       {:ok, redis_config} ->
         init_consumer_group!(client, opts[:group_start_id], redis_config)
-        {:ok, _} = Heartbeat.start_link(client, redis_config, opts[:heartbeat_interval])
+
+        {:ok, heartbeat_pid} =
+          Heartbeat.start_link(client, redis_config, opts[:heartbeat_interval])
 
         state =
           Map.new(opts)
@@ -78,6 +80,7 @@ defmodule OffBroadwayRedisStream.Producer do
             receive_timer: nil,
             last_id: "0",
             last_checked: 0,
+            heartbeat_pid: heartbeat_pid,
             pending_ack: []
           })
 
@@ -122,6 +125,20 @@ defmodule OffBroadwayRedisStream.Producer do
   @impl GenStage
   def handle_info(_, state) do
     {:noreply, [], state}
+  end
+
+  @impl GenStage
+  def terminate(_reason, state) do
+    case redis_cmd(:ack, [state.pending_ack], state, 2) do
+      :ok ->
+        :ok
+
+      {:error, error} ->
+        Logger.warn("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
+    end
+
+    Heartbeat.stop(state.heartbeat_pid)
+    :ok
   end
 
   @impl Producer

@@ -10,6 +10,10 @@ defmodule OffBroadwayRedisStream.Heartbeat do
     GenServer.start_link(__MODULE__, {client, config, heartbeat_interval})
   end
 
+  def stop(pid) do
+    GenServer.stop(pid, :shutdown)
+  end
+
   @impl true
   def init({client, config, heartbeat_interval}) do
     state = %{client: client, config: config, heartbeat_interval: heartbeat_interval}
