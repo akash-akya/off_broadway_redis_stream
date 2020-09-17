@@ -24,7 +24,8 @@ defmodule OffBroadwayRedisStream.MixProject do
     [
       {:broadway, "~> 0.6.0"},
       {:redix, ">= 0.0.0"},
-      {:mox, "~> 0.5", only: :test}
+      {:mox, "~> 0.5", only: :test},
+      {:ex_doc, "~> 0.22", only: :dev, runtime: false}
     ]
   end
 
