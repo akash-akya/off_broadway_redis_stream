@@ -3,26 +3,35 @@ defmodule OffBroadwayRedisStream.ProducerTest do
   alias RedisHelper
   alias OffBroadwayRedisStream.RedisClient
   alias OffBroadwayRedisStream.RedisMock
+  alias Broadway.Message
   import Mox
 
   defmodule Forwarder do
     use Broadway
 
-    def handle_message(_, message, %{test_pid: test_pid, test_sleep_duration: duration}) do
+    def handle_message(_, message, context) do
       content = %{data: message.data, metadata: message.metadata, pid: self()}
-      send(test_pid, {:message_handled, content})
-      Process.sleep(duration)
+      send(context.test_pid, {:message_handled, content})
+
+      case context.action do
+        {:sleep, duration} -> Process.sleep(duration)
+        {:fail, _count} -> raise "error"
+        _ -> :ok
+      end
+
       message
     end
 
-    def handle_batch(_, messages, _batch_info, %{
-          test_pid: test_pid,
-          test_sleep_duration: duration
-        }) do
-      content = %{id: List.last(messages).metadata.id, pid: self()}
-      Process.sleep(duration)
-      send(test_pid, {:batch_handled, content})
-      messages
+    def handle_failed(messages, context) do
+      Enum.map(messages, fn %{metadata: %{attempt: attempt}} = message ->
+        case context.action do
+          {:fail, max} when attempt < max ->
+            Message.configure_ack(message, retry: true)
+
+          _ ->
+            message
+        end
+      end)
     end
   end
 
@@ -55,7 +64,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     RedisHelper.xadd(:redix, @stream, "10000", foo: "bar")
     assert_receive {:message_handled, %{data: data, metadata: metadata}}
     assert data == ["10000-0", ["foo", "\"bar\""]]
-    assert metadata == %{id: "10000-0"}
+    assert metadata == %{id: "10000-0", attempt: 1}
 
     stop_broadway(pid)
   end
@@ -95,7 +104,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     push_messages(:redix, @stream, 1..5)
 
     {:ok, pid} =
-      start_broadway(@stream, group: @group, consumer_name: consumer, test_sleep_duration: 100_000)
+      start_broadway(@stream, group: @group, consumer_name: consumer, action: {:sleep, 100_000})
 
     assert_receive {:message_handled, %{data: _}}
     refute_receive {:ack, _}
@@ -127,7 +136,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
       start_broadway(@stream,
         group: @group,
         consumer_name: consumer1,
-        test_sleep_duration: 100_000
+        action: {:sleep, 100_000}
       )
 
     assert_receive {:message_handled, %{data: _}}
@@ -210,6 +219,33 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
   end
 
+  test "retries" do
+    consumer = "test-cosnumer-1"
+    Process.flag(:trap_exit, true)
+
+    RedisHelper.create_stream(:redix, @stream, @group)
+    push_messages(:redix, @stream, 1..5)
+
+    attempts = 2
+
+    {:ok, pid} =
+      start_broadway(@stream,
+        group: @group,
+        consumer_name: consumer,
+        action: {:fail, attempts}
+      )
+
+    for id <- 1..5, _ <- 1..attempts do
+      id = "#{id}-0"
+      assert_receive {:message_handled, %{data: [^id, _]}}
+    end
+
+    Process.sleep(50)
+    stop_broadway(pid)
+
+    assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
+  end
+
   defp push_messages(pid, stream, ids) do
     for id <- ids do
       RedisHelper.xadd(pid, stream, to_string(id), foo: "bar-#{id}")
@@ -222,7 +258,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     batchers_concurrency = Keyword.get(opts, :batchers_concurrency)
     group = Keyword.get(opts, :group, "test-group")
     consumer_name = Keyword.get(opts, :consumer_name, "test")
-    test_sleep_duration = Keyword.get(opts, :test_sleep_duration, 0)
+    action = Keyword.get(opts, :action)
     redis_command_retry_timeout = Keyword.get(opts, :redis_command_retry_timeout, 5)
 
     batchers =
@@ -235,7 +271,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     {:ok, pid} =
       Broadway.start_link(Forwarder,
         name: new_unique_name(),
-        context: %{test_pid: self(), test_sleep_duration: test_sleep_duration},
+        context: %{test_pid: self(), action: action},
         producer: [
           module:
             {OffBroadwayRedisStream.Producer,

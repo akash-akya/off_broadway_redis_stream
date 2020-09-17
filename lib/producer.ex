@@ -18,17 +18,26 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:group` - Required. Redis consumer group. Group will be created with `:group_start_id` ID if it is not already present.
 
-    * `:consumer_name` - Required. Redis Consumer name for the producer
-
     * `:group_start_id` - Optional. Starting stream ID which should be used when consumer group *created*. Use $ for latest ID. see [XGROUP CREATE](https://redis.io/commands/xgroup). Default is `$`
 
-    * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, interval duration. Default is 5000
+    * `:consumer_name` - Required. Redis consumer name for the producer in the configured consumer-group
 
-    * `:allowed_missed_heartbeats` - Optional. Missed heartbeats allowed, after this that consumer is considered to be dead and other consumers claim its pending events. Default is 4
+    * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, this is interval duration. Default is 5000
+
+    * `:allowed_missed_heartbeats` - Optional. Number of allowed missing heartbeats for a consumer. The consumer is considered to be dead after this and other consumers claim its pending messages. Default is 4
 
   ## Acknowledgments
 
-  Both successful and failed messages are acknowledged. use `handle_failure` callback to handle failures such as moving to other stream or persisting failure job etc
+  Both successful and failed messages are acknowledged by default. Use `Broadway.Message.configure_ack/2` to change this behaviour for failed messages. If a message configured to retry, that message will be attempted again in next batch.
+  ```elixir
+  if message.metadata.attempt < @max_attempts do
+    Message.configure_ack(message, retry: true)
+  else
+    message
+  end
+  ```
+  `attempt` field in metadata can be used to control maximum retries.
+  use `handle_failure` callback to handle failures by moving messages to other stream or persisting failed jobs etc
 
   ## Message Data
 
@@ -81,7 +90,8 @@ defmodule OffBroadwayRedisStream.Producer do
             last_id: "0",
             last_checked: 0,
             heartbeat_pid: heartbeat_pid,
-            pending_ack: []
+            pending_ack: [],
+            retryable: []
           })
 
         {:producer, state}
@@ -104,8 +114,9 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   @impl GenStage
-  def handle_info({:ack, ids}, state) do
-    ids = state.pending_ack ++ ids
+  def handle_info({:ack, ack_ids, retryable}, state) do
+    ids = state.pending_ack ++ ack_ids
+    state = %{state | retryable: state.retryable ++ retryable}
 
     case redis_cmd(:ack, [ids], state, 0) do
       :ok ->
@@ -148,13 +159,16 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp receive_messages(%{receive_timer: nil, demand: demand} = state) when demand > 0 do
+    {retryable_messages, state} = retryable_messages(state)
+    state = %{state | demand: state.demand - length(retryable_messages)}
+
     {claimed_messages, last_checked} = maybe_claim_dead_consumer_messages(state)
     state = %{state | demand: state.demand - length(claimed_messages), last_checked: last_checked}
 
     {new_messages, last_id} = fetch_messages_from_redis(state)
     state = %{state | demand: state.demand - length(new_messages), last_id: last_id}
 
-    messages = claimed_messages ++ new_messages
+    messages = retryable_messages ++ claimed_messages ++ new_messages
     receive_timer = maybe_schedule_timer(state, length(messages), state.demand)
 
     {:noreply, messages, %{state | receive_timer: receive_timer}}
@@ -317,12 +331,35 @@ defmodule OffBroadwayRedisStream.Producer do
     end
   end
 
+  defp retryable_messages(state) do
+    %{demand: demand, retryable: retryable} = state
+    {messages, rest} = Enum.split(retryable, demand)
+    {prepare_failed_messages(messages), %{state | retryable: rest}}
+  end
+
   defp wrap_messages(redis_messages, stream, group) do
     Enum.map(redis_messages, fn [id, _] = data ->
-      ack_data = %{id: id}
+      ack_data = %{id: id, retry: false}
       ack_ref = {self(), {stream, group}}
 
-      %Message{data: data, metadata: %{id: id}, acknowledger: {Acknowledger, ack_ref, ack_data}}
+      %Message{
+        data: data,
+        metadata: %{id: id, attempt: 1},
+        acknowledger: {Acknowledger, ack_ref, ack_data}
+      }
+    end)
+  end
+
+  defp prepare_failed_messages(messages) do
+    Enum.map(messages, fn message ->
+      {_, ack_ref, ack_data} = message.acknowledger
+      metadata = Map.update!(message.metadata, :attempt, &(&1 + 1))
+
+      %Message{
+        message
+        | metadata: metadata,
+          acknowledger: {Acknowledger, ack_ref, %{ack_data | retry: false}}
+      }
     end)
   end
 

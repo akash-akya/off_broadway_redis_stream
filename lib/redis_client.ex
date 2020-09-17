@@ -1,6 +1,4 @@
 defmodule OffBroadwayRedisStream.RedisClient do
-  @moduledoc false
-
   defmodule ConnectionError do
     @type t :: %__MODULE__{reason: atom}
 
