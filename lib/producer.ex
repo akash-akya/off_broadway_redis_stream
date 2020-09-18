@@ -1,11 +1,12 @@
 defmodule OffBroadwayRedisStream.Producer do
   @moduledoc """
   A GenStage Producer for Redis Stream.
-  Acts as a unique consumer in specified Consumer Group. see https://redis.io/topics/streams-intro.
 
-  Producer automatically claim pending messages after certain timeout in case of abnormal termination of a producer.
+  It acts as a consumer in the specified Redis consumer group. Introduction to Redis Stream can be found at: https://redis.io/topics/streams-intro.
 
-  Currently it only support Redis 6.0 and above
+  Support failover by automatically claiming pending messages of a dead node. A node is considered dead when it fails send heartbeats.
+
+  Currently, it only supports Redis 6.0.2 and above
 
   ## Producer Options
 
@@ -20,7 +21,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:group_start_id` - Optional. Starting stream ID which should be used when consumer group *created*. Use $ for latest ID. see [XGROUP CREATE](https://redis.io/commands/xgroup). Default is `$`
 
-    * `:consumer_name` - Required. Redis consumer name for the producer in the configured consumer-group
+    * `:consumer_name` - Required. Redis consumer name for the Broadway instance in the consumer-group. If you are running multiple consumers, make sure that each consumer has unique name.
 
     * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, this is interval duration. Default is 5000
 

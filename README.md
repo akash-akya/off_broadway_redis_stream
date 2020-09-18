@@ -1,21 +1,60 @@
 # OffBroadwayRedisStream
 
-**TODO: Add description**
+A Redis Stream consumer for [Broadway](https://github.com/dashbitco/broadway).
 
-## Installation
+Broadway producer acts as a consumer in the specified Redis consumer group. Introduction to Redis Stream can be found at: https://redis.io/topics/streams-intro.
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `off_broadway_redis_stream` to your list of dependencies in `mix.exs`:
+Support failover by automatically claiming pending messages of a dead node. A node is considered dead when it fails send heartbeats.
 
 ```elixir
-def deps do
-  [
-    {:off_broadway_redis_stream, "~> 0.1.0"}
-  ]
+defmodule MyBroadway do
+  use Broadway
+
+  def start_link(_opts) do
+    Broadway.start_link(__MODULE__,
+      name: __MODULE__,
+      producer: [
+        module:
+          {OffBroadwayRedisStream.Producer,
+           [
+             redis_client_opts: [host: "localhost"],
+             stream: "orders",
+             group: "processor-group",
+             consumer_name: hostname()
+           ]}
+      ],
+      processors: [
+        default: [min_demand: 5, max_demand: 1000]
+      ]
+    )
+  end
+
+  def handle_message(_, message, _) do
+    [_id, key_value_list] = message.data
+    IO.inspect(key_value_list, label: "Got message")
+    message
+  end
+
+  @max_attempts 5
+
+  def handle_failed(messages, _) do
+    for message <- messages do
+      if message.metadata.attempt < @max_attempts do
+        Broadway.Message.configure_ack(message, retry: true)
+      else
+        [id, _] = message.data
+        IO.inspect(id, label: "Dropping")
+      end
+    end
+  end
+
+  defp hostname do
+    {:ok, host} = :inet.gethostname()
+    to_string(host)
+  end
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at [https://hexdocs.pm/off_broadway_redis_stream](https://hexdocs.pm/off_broadway_redis_stream).
+Currently, it only supports Redis 6.0.2 and above.
 
+Please check module documentation for more information
