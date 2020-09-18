@@ -12,7 +12,7 @@ defmodule OffBroadwayRedisStream.Producer do
     * `:redis_client_opts` - Required. Redis client specific options. Default client is [Redix](https://hexdocs.pm/redix/Redix.html) and for Redix this is used to start redix process `Redix.start_link(opts)`. see [Redix Documentation](https://hexdocs.pm/redix/Redix.html#start_link/1)
 
     * `:receive_interval` - Optional. The duration (in milliseconds) for which the producer
-      waits before making a request for more messages if there are no events in stream. Default is 2000.
+      waits before making a request for more messages if there are no events in stream. Default is 1000.
 
     * `:stream` - Required. Redis stream name
 
@@ -24,7 +24,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, this is interval duration. Default is 5000
 
-    * `:allowed_missed_heartbeats` - Optional. Number of allowed missing heartbeats for a consumer. The consumer is considered to be dead after this and other consumers claim its pending messages. Default is 4
+    * `:allowed_missed_heartbeats` - Optional. Number of allowed missing heartbeats for a consumer. The consumer is considered to be dead after this and other consumers claim its pending messages. Default is 3
 
   ## Acknowledgments
 
@@ -56,11 +56,11 @@ defmodule OffBroadwayRedisStream.Producer do
 
   @default_opts [
     heartbeat_interval: 5000,
-    receive_interval: 2000,
+    receive_interval: 1000,
     client: OffBroadwayRedisStream.RedixClient,
-    allowed_missed_heartbeats: 4,
-    max_pending_ack: 1000,
-    redis_command_retry_timeout: 500,
+    allowed_missed_heartbeats: 3,
+    max_pending_ack: 100_000,
+    redis_command_retry_timeout: 300,
     group_start_id: "$"
   ]
 
@@ -289,7 +289,7 @@ defmodule OffBroadwayRedisStream.Producer do
     end
   end
 
-  @max_messages 1000
+  @max_messages_per_batch 100_000
 
   defp fetch_messages_from_redis(%{demand: demand} = state) when demand == 0,
     do: {[], state.last_id}
@@ -303,7 +303,7 @@ defmodule OffBroadwayRedisStream.Producer do
       last_id: last_id
     } = state
 
-    count = min(demand, @max_messages)
+    count = min(demand, @max_messages_per_batch)
 
     case redis_cmd(:fetch, [count, last_id], state) do
       {:ok, []} ->

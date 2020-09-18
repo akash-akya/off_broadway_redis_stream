@@ -32,7 +32,7 @@ defmodule OffBroadwayRedisStream.Heartbeat do
     {:noreply, state}
   end
 
-  @redis_command_retry_timeout 500
+  @redis_command_retry_timeout 300
   @max_retries 2
 
   defp heartbeat(
