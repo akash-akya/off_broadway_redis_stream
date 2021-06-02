@@ -1,4 +1,4 @@
-# OffBroadwayRedisStream
+# OffBroadwayRedisStream [![Hex.pm](https://img.shields.io/hexpm/v/off_broadway_redis_stream.svg)](https://hex.pm/packages/off_broadway_redis_stream)
 
 A Redis Stream consumer for [Broadway](https://github.com/dashbitco/broadway).
 
@@ -58,3 +58,19 @@ end
 Currently, it only supports Redis 6.0.2 and above.
 
 Please check module documentation for more information
+
+## Installation
+
+```elixir
+def deps do
+  [
+    {:off_broadway_redis_stream, "~> x.x.x"}
+  ]
+end
+```
+
+### License
+
+Copyright (c) 2021 Akash Hiremath.
+
+OffBroadwayRedisStream source code is released under Apache License 2.0. Check [LICENSE](LICENSE.md) for more information.
