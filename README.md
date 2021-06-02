@@ -57,7 +57,7 @@ end
 
 Currently, it only supports Redis 6.0.2 and above.
 
-Please check module documentation for more information
+Please check [documentation](https://hexdocs.pm/off_broadway_redis_stream) for more information
 
 ## Installation
 
