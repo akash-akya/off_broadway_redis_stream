@@ -8,18 +8,40 @@ defmodule OffBroadwayRedisStream.MixProject do
       elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # Package
+      package: package(),
+      description: description(),
+
+      # Docs
+      source_url: "https://github.com/akash-akya/off_broadway_redis_stream",
+      homepage_url: "https://github.com/akash-akya/off_broadway_redis_stream",
+      docs: [
+        main: "readme",
+        extras: ["README.md"]
+      ]
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
+  defp description do
+    "A Redis Stream consumer for Broadway"
+  end
+
+  defp package do
+    [
+      maintainers: ["Akash Hiremath"],
+      licenses: ["Apache-2.0"],
+      links: %{GitHub: "https://github.com/akash-akya/off_broadway_redis_stream"}
+    ]
+  end
+
   defp deps do
     [
       {:broadway, "~> 0.6.0"},
