@@ -27,6 +27,8 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:allowed_missed_heartbeats` - Optional. Number of allowed missing heartbeats for a consumer. The consumer is considered to be dead after this and other consumers claim its pending messages. Default is 3
 
+    * `:make_stream` - Optional. Appends MKSTREAM subcommand to `XGROUP CREATE` which automatically create the stream if it doesn't exist. See [XGROUP CREATE](https://redis.io/commands/xgroup). Default is false
+
   ## Acknowledgments
 
   Both successful and failed messages are acknowledged by default. Use `Broadway.Message.configure_ack/2` to change this behaviour for failed messages. If a message configured to retry, that message will be attempted again in next batch.
@@ -62,7 +64,8 @@ defmodule OffBroadwayRedisStream.Producer do
     allowed_missed_heartbeats: 3,
     max_pending_ack: 100_000,
     redis_command_retry_timeout: 300,
-    group_start_id: "$"
+    group_start_id: "$",
+    make_stream: false
   ]
 
   @impl GenStage
@@ -407,7 +410,8 @@ defmodule OffBroadwayRedisStream.Producer do
          :ok <- validate_option(:consumer_name, opts[:consumer_name]),
          :ok <- validate_option(:receive_interval, opts[:receive_interval]),
          :ok <- validate_option(:allowed_missed_heartbeats, opts[:allowed_missed_heartbeats]),
-         :ok <- validate_option(:heartbeat_interval, opts[:heartbeat_interval]) do
+         :ok <- validate_option(:heartbeat_interval, opts[:heartbeat_interval]),
+         :ok <- validate_option(:make_stream, opts[:make_stream]) do
       :ok
     end
   end
@@ -437,6 +441,9 @@ defmodule OffBroadwayRedisStream.Producer do
   defp validate_option(:redis_command_retry_timeout, value)
        when not is_integer(value) and value > 0,
        do: validation_error(:redis_command_retry_timeout, "a positive integer", value)
+
+  defp validate_option(:make_stream, value) when not is_boolean(value),
+    do: validation_error(:make_stream, "a boolean", value)
 
   defp validate_option(_, _), do: :ok
 
