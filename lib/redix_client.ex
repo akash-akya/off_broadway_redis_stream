@@ -45,7 +45,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
     cmd = ~w(XGROUP CREATE #{stream} #{group} #{id})
 
     cmd =
-      if(make_stream) do
+      if make_stream do
         cmd ++ ["MKSTREAM"]
       else
         cmd
