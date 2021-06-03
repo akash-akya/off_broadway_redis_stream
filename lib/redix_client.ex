@@ -41,8 +41,15 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
   @impl true
   def create_group(id, config) do
-    %{stream: stream, group: group, redix_pid: pid} = config
+    %{stream: stream, group: group, redix_pid: pid, make_stream: make_stream} = config
     cmd = ~w(XGROUP CREATE #{stream} #{group} #{id})
+
+    cmd =
+      if(make_stream) do
+        cmd ++ ["MKSTREAM"]
+      else
+        cmd
+      end
 
     case command(pid, cmd) do
       {:ok, _} -> :ok
