@@ -4,7 +4,7 @@ defmodule OffBroadwayRedisStream.MixProject do
   def project do
     [
       app: :off_broadway_redis_stream,
-      version: "0.1.1",
+      version: "0.2.0",
       elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
