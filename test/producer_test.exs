@@ -92,6 +92,27 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     :timer.sleep(10)
 
     assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
+    assert 5 == RedisHelper.xlen(:redix, @stream)
+
+    stop_broadway(pid)
+  end
+
+  test "producer acknowledging and deleting messages" do
+    consumer = "baz"
+    RedisHelper.create_stream(:redix, @stream, @group)
+
+    {:ok, pid} =
+      start_broadway(@stream,
+        group: @group,
+        consumer_name: consumer,
+        delete_on_acknowledgment: true
+      )
+
+    push_messages(:redix, @stream, 1..5)
+    :timer.sleep(10)
+
+    assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
+    assert 0 == RedisHelper.xlen(:redix, @stream)
 
     stop_broadway(pid)
   end
@@ -145,7 +166,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     pending = RedisHelper.xpending(:redix, @stream, @group, consumer1)
     assert length(pending) == 5
 
-    Supervisor.stop(pid1, :kill, 10)
+    Supervisor.stop(pid1, :kill, 100)
     flush_all_messages()
     # wait for consumer1 to cross allowed_missed_heartbeats
     Process.sleep(500)
@@ -260,6 +281,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     consumer_name = Keyword.get(opts, :consumer_name, "test")
     action = Keyword.get(opts, :action)
     redis_command_retry_timeout = Keyword.get(opts, :redis_command_retry_timeout, 5)
+    delete_on_acknowledgment = Keyword.get(opts, :delete_on_acknowledgment, false)
 
     batchers =
       if batchers_concurrency do
@@ -285,7 +307,8 @@ defmodule OffBroadwayRedisStream.ProducerTest do
                receive_interval: 0,
                heartbeat_interval: 100,
                allowed_missed_heartbeats: 2,
-               redis_command_retry_timeout: redis_command_retry_timeout
+               redis_command_retry_timeout: redis_command_retry_timeout,
+               delete_on_acknowledgment: delete_on_acknowledgment
              ]},
           concurrency: producers_concurrency
         ],

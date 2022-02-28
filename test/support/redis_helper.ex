@@ -12,6 +12,10 @@ defmodule RedisHelper do
     Redix.command!(pid, ~w(XPENDING #{stream} #{group} - + 100000 #{consumer}))
   end
 
+  def xlen(pid, stream) do
+    Redix.command!(pid, ~w(XLEN #{stream}))
+  end
+
   def flushall(pid) do
     Redix.command!(pid, ~w(FLUSHALL))
   end

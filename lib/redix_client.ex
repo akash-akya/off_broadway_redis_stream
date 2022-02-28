@@ -90,6 +90,19 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   @impl true
+  def delete_message([], _config), do: :ok
+
+  def delete_message(ids, config) do
+    %{stream: stream, redix_pid: pid} = config
+    cmd = ["XDEL", stream] ++ ids
+
+    case Redix.noreply_command(pid, cmd) do
+      :ok -> :ok
+      result -> result
+    end
+  end
+
+  @impl true
   def delete_consumers(consumers, config) do
     %{stream: stream, group: group, redix_pid: pid} = config
     commands = Enum.map(consumers, &["XGROUP", "DELCONSUMER", stream, group, &1])
