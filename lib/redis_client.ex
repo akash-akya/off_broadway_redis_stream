@@ -37,6 +37,9 @@ defmodule OffBroadwayRedisStream.RedisClient do
   @callback ack(ids :: [id], config :: keyword) ::
               :ok | {:error, ConnectionError.t()} | {:error, any}
 
+  @callback delete_message(ids :: [id], config :: keyword) ::
+              :ok | {:error, ConnectionError.t()} | {:error, any}
+
   @callback delete_consumers(consumers :: [String.t()], config :: keyword) ::
               :ok | {:error, ConnectionError.t()} | {:error, any}
 end

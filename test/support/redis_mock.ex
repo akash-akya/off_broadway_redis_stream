@@ -21,6 +21,14 @@ defmodule OffBroadwayRedisStream.RedisMock do
   end
 
   @impl true
+  def delete_message(ids, config) do
+    info = %{ids: ids, pid: self()}
+    Super.delete_message(ids, config)
+    send(config[:test_pid], {:delete_message, info})
+    :ok
+  end
+
+  @impl true
   def consumers_info(config) do
     {:ok, info} = Super.consumers_info(config)
     send(config[:test_pid], {:consumer_info, info})
