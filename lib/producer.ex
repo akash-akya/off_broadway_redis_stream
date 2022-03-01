@@ -2,9 +2,9 @@ defmodule OffBroadwayRedisStream.Producer do
   @moduledoc """
   A GenStage Producer for Redis Stream.
 
-  It acts as a consumer in the specified Redis consumer group. Introduction to Redis Stream can be found at: https://redis.io/topics/streams-intro.
+  Broadway producer acts as a consumer in the specified Redis stream consumer group. You can run multiple consumers to get better throughput and fault tolerance. Please check [Redis Stream Intro](https://redis.io/topics/streams-intro) for details on stream data type.
 
-  Support failover by automatically claiming pending messages of a dead node. A node is considered dead when it fails send heartbeats.
+  It supports failover by automatically claiming pending messages when a node dies. A node is considered dead when it fails to send heartbeats.
 
   Currently, it only supports Redis 6.0.2 and above
 
@@ -13,7 +13,7 @@ defmodule OffBroadwayRedisStream.Producer do
     * `:redis_client_opts` - Required. Redis client specific options. Default client is [Redix](https://hexdocs.pm/redix/Redix.html) and for Redix this is used to start redix process `Redix.start_link(opts)`. see [Redix Documentation](https://hexdocs.pm/redix/Redix.html#start_link/1)
 
     * `:receive_interval` - Optional. The duration (in milliseconds) for which the producer
-      waits before making a request for more messages if there are no events in stream. Default is 1000.
+      waits before making a request for more messages if there are no events in stream. Default is `1000`.
 
     * `:stream` - Required. Redis stream name
 
@@ -23,11 +23,11 @@ defmodule OffBroadwayRedisStream.Producer do
 
     * `:consumer_name` - Required. Redis consumer name for the Broadway instance in the consumer-group. If you are running multiple consumers, make sure that each consumer has unique name.
 
-    * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, this is interval duration. Default is 5000
+    * `:heartbeat_interval` - Optional. Producer sends heartbeats at regular intervals, this is interval duration. Default is `5000`
 
-    * `:allowed_missed_heartbeats` - Optional. Number of allowed missing heartbeats for a consumer. The consumer is considered to be dead after this and other consumers claim its pending messages. Default is 3
+    * `:allowed_missed_heartbeats` - Optional. Number of allowed missing heartbeats for a consumer. The consumer is considered to be dead after this and other consumers claim its pending messages. Default is `3`
 
-    * `:make_stream` - Optional. Appends MKSTREAM subcommand to `XGROUP CREATE` which automatically create the stream if it doesn't exist. See [XGROUP CREATE](https://redis.io/commands/xgroup). Default is false
+    * `:make_stream` - Optional. Appends MKSTREAM subcommand to `XGROUP CREATE` which automatically create the stream if it doesn't exist. See [XGROUP CREATE](https://redis.io/commands/xgroup). Default is `false`
 
     * `delete_on_acknowledgment` - Optional. When `XACK`ing a message also
       `XDEL`ete it. Defaults to `false`
