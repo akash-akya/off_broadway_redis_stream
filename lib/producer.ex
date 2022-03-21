@@ -47,7 +47,16 @@ defmodule OffBroadwayRedisStream.Producer do
 
   ## Message Data
 
-  Message data is a 2 element list. First item is id of the message, second is the data
+  Message data is a 2 element list. First item is id of the message, second is
+  the data
+
+  ## Retry After
+
+  If `message.metadata.retry_after` is present and represents a unix
+  timestamp (in milliseconds) in the future then the message will not be retried until after the
+  time has passed. This is useful for when you are using
+  `off_broadway_redis_stream` to talk to third party apis that may rate limit
+  you and you need to back off from sending requests.
   """
 
   use GenStage
