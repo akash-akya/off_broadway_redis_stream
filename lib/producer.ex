@@ -388,8 +388,21 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp retryable_messages(state) do
     %{demand: demand, retryable: retryable} = state
-    {messages, rest} = Enum.split(retryable, demand)
-    {prepare_failed_messages(messages), %{state | retryable: rest}}
+
+    current_time = System.os_time(:millisecond)
+
+    {retry_now, retry_later} =
+      Enum.split_with(retryable, fn
+        %{metadata: %{retry_after: retry_after}} ->
+          retry_after < current_time
+
+        _ ->
+          true
+      end)
+
+    {messages_to_retry_now, rest} = Enum.split(retry_now, demand)
+
+    {prepare_failed_messages(messages_to_retry_now), %{state | retryable: retry_later ++ rest}}
   end
 
   defp wrap_messages(redis_messages, stream, group) do

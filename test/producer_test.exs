@@ -16,6 +16,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
       case context.action do
         {:sleep, duration} -> Process.sleep(duration)
         {:fail, _count} -> raise "error"
+        {:retry_after, _retry_after, _max} -> raise "error"
         _ -> :ok
       end
 
@@ -23,10 +24,17 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     end
 
     def handle_failed(messages, context) do
-      Enum.map(messages, fn %{metadata: %{attempt: attempt}} = message ->
+      Enum.map(messages, fn %{metadata: %{attempt: attempt} = metadata} = message ->
         case context.action do
           {:fail, max} when attempt < max ->
             Message.configure_ack(message, retry: true)
+
+          {:retry_after, retry_after, max} when attempt < max ->
+            %Message{
+              message
+              | metadata: Map.merge(metadata, %{retry_after: retry_after})
+            }
+            |> Message.configure_ack(retry: true)
 
           _ ->
             message
@@ -260,6 +268,36 @@ defmodule OffBroadwayRedisStream.ProducerTest do
       id = "#{id}-0"
       assert_receive {:message_handled, %{data: [^id, _]}}
     end
+
+    Process.sleep(50)
+    stop_broadway(pid)
+
+    assert [] == RedisHelper.xpending(:redix, @stream, @group, consumer)
+  end
+
+  test "when a retry_after timestamp is in the message metadata, skips until time has passed" do
+    consumer = "test-cosnumer-1"
+    Process.flag(:trap_exit, true)
+
+    RedisHelper.create_stream(:redix, @stream, @group)
+    push_messages(:redix, @stream, 1..1)
+
+    attempts = 2
+    retry_after = System.os_time(:millisecond) + 500
+
+    {:ok, pid} =
+      start_broadway(@stream,
+        group: @group,
+        consumer_name: consumer,
+        action: {:retry_after, retry_after, attempts}
+      )
+
+    assert_receive {:message_handled, %{data: ["1-0", _]}}, 100
+
+    # Test that you have to wait before the retry happens
+    refute_receive {:message_handled, %{data: ["1-0", _]}}, 400
+
+    assert_receive {:message_handled, %{data: ["1-0", _]}}, 100
 
     Process.sleep(50)
     stop_broadway(pid)
