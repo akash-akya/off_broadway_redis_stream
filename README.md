@@ -1,10 +1,14 @@
-# OffBroadwayRedisStream [![Hex.pm](https://img.shields.io/hexpm/v/off_broadway_redis_stream.svg)](https://hex.pm/packages/off_broadway_redis_stream)
+# OffBroadwayRedisStream
+
+[![CI](https://github.com/akash-akya/off_broadway_redis_stream/actions/workflows/elixir.yml/badge.svg)](https://github.com/akash-akya/off_broadway_redis_stream/actions/workflows/elixir.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/off_broadway_redis_stream.svg)](https://hex.pm/packages/off_broadway_redis_stream)
+[![docs](https://img.shields.io/badge/docs-hexpm-blue.svg)](https://hexdocs.pm/off_broadway_redis_stream/)
 
 A Redis Stream consumer for [Broadway](https://github.com/dashbitco/broadway).
 
-Broadway producer acts as a consumer in the specified Redis consumer group. Introduction to Redis Stream can be found at: https://redis.io/topics/streams-intro.
+Broadway producer acts as a consumer in the specified Redis stream consumer group. You can run multiple consumers to get better throughput and fault tolerance. Please check [Redis Stream Intro](https://redis.io/topics/streams-intro) for details on stream data type.
 
-Support failover by automatically claiming pending messages of a dead node. A node is considered dead when it fails send heartbeats.
+It supports failover by automatically claiming pending messages when a node dies. A node is considered dead when it fails to send heartbeats.
 
 ```elixir
 defmodule MyBroadway do
@@ -56,8 +60,6 @@ end
 ```
 
 Currently, it only supports Redis 6.0.2 and above.
-
-Please check [documentation](https://hexdocs.pm/off_broadway_redis_stream) for more information
 
 ## Installation
 

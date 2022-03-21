@@ -1,10 +1,13 @@
 defmodule OffBroadwayRedisStream.MixProject do
   use Mix.Project
 
+  @version "0.3.0"
+  @scm_url "https://github.com/akash-akya/off_broadway_redis_stream"
+
   def project do
     [
       app: :off_broadway_redis_stream,
-      version: "0.2.0",
+      version: @version,
       elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -15,11 +18,15 @@ defmodule OffBroadwayRedisStream.MixProject do
       description: description(),
 
       # Docs
-      source_url: "https://github.com/akash-akya/off_broadway_redis_stream",
-      homepage_url: "https://github.com/akash-akya/off_broadway_redis_stream",
+      source_url: @scm_url,
+      homepage_url: @scm_url,
       docs: [
         main: "readme",
-        extras: ["README.md"]
+        source_ref: "v#{@version}",
+        extras: [
+          "README.md",
+          "LICENSE.md"
+        ]
       ]
     ]
   end
@@ -38,7 +45,7 @@ defmodule OffBroadwayRedisStream.MixProject do
     [
       maintainers: ["Akash Hiremath"],
       licenses: ["Apache-2.0"],
-      links: %{GitHub: "https://github.com/akash-akya/off_broadway_redis_stream"}
+      links: %{GitHub: @scm_url}
     ]
   end
 
