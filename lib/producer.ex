@@ -430,7 +430,11 @@ defmodule OffBroadwayRedisStream.Producer do
   defp prepare_failed_messages(messages) do
     Enum.map(messages, fn message ->
       {_, ack_ref, ack_data} = message.acknowledger
-      metadata = Map.update!(message.metadata, :attempt, &(&1 + 1))
+
+      metadata =
+        message.metadata
+        |> Map.update!(:attempt, &(&1 + 1))
+        |> Map.delete(:retry_after)
 
       %Message{
         message
