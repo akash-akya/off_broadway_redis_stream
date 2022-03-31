@@ -47,7 +47,16 @@ defmodule OffBroadwayRedisStream.Producer do
 
   ## Message Data
 
-  Message data is a 2 element list. First item is id of the message, second is the data
+  Message data is a 2 element list. First item is id of the message, second is
+  the data
+
+  ## Retry After
+
+  If `message.metadata.retry_after` is present and represents a unix
+  timestamp (in milliseconds) in the future then the message will not be retried until after the
+  time has passed. This is useful for when you are using
+  `off_broadway_redis_stream` to talk to third party apis that may rate limit
+  you and you need to back off from sending requests.
   """
 
   use GenStage
@@ -388,8 +397,21 @@ defmodule OffBroadwayRedisStream.Producer do
 
   defp retryable_messages(state) do
     %{demand: demand, retryable: retryable} = state
-    {messages, rest} = Enum.split(retryable, demand)
-    {prepare_failed_messages(messages), %{state | retryable: rest}}
+
+    current_time = System.os_time(:millisecond)
+
+    {retry_now, retry_later} =
+      Enum.split_with(retryable, fn
+        %{metadata: %{retry_after: retry_after}} ->
+          retry_after < current_time
+
+        _ ->
+          true
+      end)
+
+    {messages_to_retry_now, rest} = Enum.split(retry_now, demand)
+
+    {prepare_failed_messages(messages_to_retry_now), %{state | retryable: retry_later ++ rest}}
   end
 
   defp wrap_messages(redis_messages, stream, group) do
@@ -408,7 +430,11 @@ defmodule OffBroadwayRedisStream.Producer do
   defp prepare_failed_messages(messages) do
     Enum.map(messages, fn message ->
       {_, ack_ref, ack_data} = message.acknowledger
-      metadata = Map.update!(message.metadata, :attempt, &(&1 + 1))
+
+      metadata =
+        message.metadata
+        |> Map.update!(:attempt, &(&1 + 1))
+        |> Map.delete(:retry_after)
 
       %Message{
         message
