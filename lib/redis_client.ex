@@ -17,33 +17,33 @@ defmodule OffBroadwayRedisStream.RedisClient do
   @callback fetch(
               demand :: pos_integer,
               last_id :: id,
-              config :: keyword
+              config :: map
             ) :: {:ok, messages :: [message()]} | {:error, ConnectionError.t()} | {:error, any}
 
-  @callback consumers_info(config :: keyword) ::
+  @callback consumers_info(config :: map) ::
               {:ok, any} | {:error, ConnectionError.t()} | {:error, any}
 
-  @callback create_group(offset :: String.t(), config :: keyword) ::
+  @callback create_group(offset :: String.t(), config :: map) ::
               :ok | {:error, ConnectionError.t()} | {:error, any}
 
   @callback pending(
               consumer :: String.t(),
               count :: pos_integer(),
-              config :: keyword
+              config :: map
             ) :: {:ok, any} | {:error, ConnectionError.t()} | {:error, any}
 
   @callback claim(
               idle :: pos_integer,
               ids :: [id],
-              config :: keyword
+              config :: map
             ) :: {:ok, messages :: [message()]} | {:error, ConnectionError.t()} | {:error, any}
 
-  @callback ack(ids :: [id], config :: keyword) ::
+  @callback ack(ids :: [id], config :: map) ::
               :ok | {:error, ConnectionError.t()} | {:error, any}
 
-  @callback delete_message(ids :: [id], config :: keyword) ::
+  @callback delete_message(ids :: [id], config :: map) ::
               :ok | {:error, ConnectionError.t()} | {:error, any}
 
-  @callback delete_consumers(consumers :: [String.t()], config :: keyword) ::
+  @callback delete_consumers(consumers :: [String.t()], config :: map) ::
               :ok | {:error, ConnectionError.t()} | {:error, any}
 end
