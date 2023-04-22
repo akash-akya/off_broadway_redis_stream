@@ -2,9 +2,15 @@ defmodule OffBroadwayRedisStream.Producer do
   @moduledoc """
   A GenStage Producer for Redis Stream.
 
-  Broadway producer acts as a consumer in the specified Redis stream consumer group. You can run multiple consumers to get better throughput and fault tolerance. Please check [Redis Stream Intro](https://redis.io/topics/streams-intro) for details on stream data type.
+  Broadway producer acts as a consumer in the specified Redis stream
+  consumer group. You can run multiple consumers to get better
+  throughput and fault tolerance. Please check [Redis Stream
+  Intro](https://redis.io/topics/streams-intro) for details on stream
+  data type.
 
-  It supports failover by automatically claiming pending messages when a node dies. A node is considered dead when it fails to send heartbeats.
+  It supports failover by automatically claiming pending messages when
+  a node dies. A node is considered dead when it fails to send
+  heartbeats.
 
   Currently, it only supports Redis 6.0.2 and above
 
@@ -32,9 +38,13 @@ defmodule OffBroadwayRedisStream.Producer do
     * `delete_on_acknowledgment` - Optional. When `XACK`ing a message also
       `XDEL`ete it. Defaults to `false`
 
-  ## Acknowledgments
+  ## Acknowledgements
 
-  Both successful and failed messages are acknowledged by default. Use `Broadway.Message.configure_ack/2` to change this behaviour for failed messages. If a message configured to retry, that message will be attempted again in next batch.
+  Both successful and failed messages are acknowledged by default. Use
+  `Broadway.Message.configure_ack/2` to change this behaviour for
+  failed messages. If a message configured to retry, that message will
+  be attempted again in next batch.
+
   ```elixir
   if message.metadata.attempt < @max_attempts do
     Message.configure_ack(message, retry: true)
@@ -42,21 +52,24 @@ defmodule OffBroadwayRedisStream.Producer do
     message
   end
   ```
+
   `attempt` field in metadata can be used to control maximum retries.
-  use `handle_failure` callback to handle failures by moving messages to other stream or persisting failed jobs etc
+  use `handle_failure` callback to handle failures by moving messages
+  to other stream or persisting failed jobs etc
 
   ## Message Data
 
-  Message data is a 2 element list. First item is id of the message, second is
-  the data
+  Message data is a 2 element list. First item is id of the message,
+  second is the data
 
   ## Retry After
 
   If `message.metadata.retry_after` is present and represents a unix
-  timestamp (in milliseconds) in the future then the message will not be retried until after the
-  time has passed. This is useful for when you are using
-  `off_broadway_redis_stream` to talk to third party apis that may rate limit
-  you and you need to back off from sending requests.
+  timestamp (in milliseconds) in the future then the message will not
+  be retried until after the time has passed. This is useful for when
+  you are using `off_broadway_redis_stream` to talk to third party
+  apis that may rate limit you and you need to back off from sending
+  requests.
   """
 
   use GenStage
