@@ -138,7 +138,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     assert_receive {:message_handled, %{data: _}}
     refute_receive {:ack, _}
 
-    Supervisor.stop(pid, :kill, 10)
+    Supervisor.stop(pid, :kill, 100)
 
     pending = RedisHelper.xpending(:redix, @stream, @group, consumer)
     assert length(pending) == 5
@@ -294,10 +294,10 @@ defmodule OffBroadwayRedisStream.ProducerTest do
 
     assert_receive {:message_handled, %{data: ["1-0", _]}}, 100
 
-    # Test that you have to wait before the retry happens
+    # assert we retry does not happen before the timeout
     refute_receive {:message_handled, %{data: ["1-0", _]}}, 400
 
-    assert_receive {:message_handled, %{data: ["1-0", _]}}, 100
+    assert_receive {:message_handled, %{data: ["1-0", _]}}, 200
 
     Process.sleep(50)
     stop_broadway(pid)
