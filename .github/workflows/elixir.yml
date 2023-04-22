@@ -1,13 +1,22 @@
 name: Elixir CI
+
 on: [push, pull_request]
+
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
-        otp: ["25", "24"]
-        elixir: ["1.14", "1.13"]
+        include:
+          - elixir: "1.12"
+            otp: "22"
+          - elixir: "1.13"
+            otp: "23"
+          - elixir: "1.14"
+            otp: "24"
+          - elixir: "1.14"
+            otp: "25"
     services:
       redis:
         image: redis:6-alpine
@@ -20,18 +29,69 @@ jobs:
         ports:
           # Maps port 6379 on service container to the host
           - 6379:6379
+
     steps:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
-      - name: Checkout
-        uses: actions/checkout@v3
+
+      - uses: actions/checkout@v3
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
       - name: Install Dependencies
-        run: mix deps.get
-      - name: Compile
-        run: mix compile --force --warnings-as-errors
-      - name: Check format
-        run: mix format --check-formatted
-      - name: Run Tests
-        run: mix test
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mix deps.get
+          mix deps.compile
+
+      - run: mix deps.get
+      - run: mix compile --force --warnings-as-errors
+      - run: mix test --trace
+
+  lint:
+    runs-on: ubuntu-22.04
+    name: Lint
+    strategy:
+      matrix:
+        include:
+          - elixir: 1.14.x
+            otp: 25.x
+    steps:
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
+
+      - uses: actions/checkout@v3
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install Dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          mix deps.get
+          mix deps.compile
+          mix dialyzer --plt
+
+      - run: mix deps.get
+      - run: mix deps.unlock --check-unused
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - run: mix dialyzer --plt
