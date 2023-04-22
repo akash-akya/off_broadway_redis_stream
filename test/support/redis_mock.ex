@@ -1,4 +1,6 @@
 defmodule OffBroadwayRedisStream.RedisMock do
+  @moduledoc false
+
   @behaviour OffBroadwayRedisStream.RedisClient
   alias OffBroadwayRedisStream.RedixClient, as: Super
 

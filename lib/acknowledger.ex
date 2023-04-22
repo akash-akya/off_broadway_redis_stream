@@ -19,9 +19,10 @@ defmodule OffBroadwayRedisStream.Acknowledger do
 
   @impl true
   def configure(_ack_ref, ack_data, options) do
-    with [retry: value] when is_boolean(value) <- options do
-      {:ok, %{ack_data | retry: value}}
-    else
+    case options do
+      [retry: value] when is_boolean(value) ->
+        {:ok, %{ack_data | retry: value}}
+
       _ ->
         {:error, "Invalid options, options must be keyword list with `:retry`"}
     end

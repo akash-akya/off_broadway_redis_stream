@@ -1,9 +1,10 @@
 defmodule OffBroadwayRedisStream.ProducerTest do
   use ExUnit.Case
-  alias RedisHelper
+
+  alias Broadway.Message
   alias OffBroadwayRedisStream.RedisClient
   alias OffBroadwayRedisStream.RedisMock
-  alias Broadway.Message
+
   import Mox
 
   defmodule Forwarder do
@@ -359,7 +360,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     {:ok, pid}
   end
 
-  defp new_unique_name() do
+  defp new_unique_name do
     :"Broadway#{System.unique_integer([:positive, :monotonic])}"
   end
 
@@ -368,7 +369,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     :"#{name}.Broadway.Producer_#{index}"
   end
 
-  defp flush_message_handled() do
+  defp flush_message_handled do
     receive do
       {:message_handled, _} -> flush_message_handled()
     after
@@ -376,7 +377,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     end
   end
 
-  defp flush_all_messages() do
+  defp flush_all_messages do
     receive do
       _ -> flush_message_handled()
     after

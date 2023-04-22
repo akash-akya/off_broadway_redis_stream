@@ -1,5 +1,9 @@
 defmodule OffBroadwayRedisStream.RedisClient do
+  @moduledoc false
+
   defmodule ConnectionError do
+    @moduledoc false
+
     @type t :: %__MODULE__{reason: atom}
 
     defexception [:reason, :message]

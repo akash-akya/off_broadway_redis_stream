@@ -60,11 +60,13 @@ defmodule OffBroadwayRedisStream.Producer do
   """
 
   use GenStage
-  alias Broadway.Producer
+
   alias Broadway.Message
+  alias Broadway.Producer
   alias OffBroadwayRedisStream.Acknowledger
   alias OffBroadwayRedisStream.Heartbeat
   alias OffBroadwayRedisStream.RedisClient
+
   require Logger
 
   @behaviour Producer
@@ -488,9 +490,8 @@ defmodule OffBroadwayRedisStream.Producer do
          :ok <- validate_option(:receive_interval, opts[:receive_interval]),
          :ok <- validate_option(:allowed_missed_heartbeats, opts[:allowed_missed_heartbeats]),
          :ok <- validate_option(:heartbeat_interval, opts[:heartbeat_interval]),
-         :ok <- validate_option(:make_stream, opts[:make_stream]),
-         :ok <- validate_option(:delete_on_acknowledgment, opts[:delete_on_acknowledgment]) do
-      :ok
+         :ok <- validate_option(:make_stream, opts[:make_stream]) do
+      validate_option(:delete_on_acknowledgment, opts[:delete_on_acknowledgment])
     end
   end
 

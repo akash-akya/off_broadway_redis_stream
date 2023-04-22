@@ -1,4 +1,6 @@
 defmodule RedisHelper do
+  @moduledoc false
+
   def xadd(pid, stream, id, list) do
     value = Enum.map_join(list, " ", fn {k, v} -> "#{k} #{inspect(v)}" end)
     Redix.command!(pid, ~w(XADD #{stream} #{id} #{value}))
