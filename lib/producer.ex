@@ -107,8 +107,6 @@ defmodule OffBroadwayRedisStream.Producer do
         raise ArgumentError, "invalid options given to #{inspect(client)}.init/1, " <> message
 
       {:ok, redis_config} ->
-        init_consumer_group!(client, opts[:group_start_id], redis_config)
-
         {:ok, heartbeat_pid} =
           Heartbeat.start_link(client, redis_config, opts[:heartbeat_interval])
 
@@ -475,10 +473,6 @@ defmodule OffBroadwayRedisStream.Producer do
       result ->
         result
     end
-  end
-
-  defp init_consumer_group!(client, group_start_id, redis_config) do
-    :ok = client.create_group(group_start_id, redis_config)
   end
 
   defp prune_consumers([], _state), do: :ok
