@@ -8,8 +8,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
   def init(config) do
     with :ok <- validate_redix_opts(config[:redis_client_opts]),
          {:ok, pid} <- Redix.start_link(config[:redis_client_opts]),
-         config <- Map.put(Map.new(config), :redix_pid, pid),
-         :ok <- check_redis_version(config) do
+         config <- Map.put(Map.new(config), :redix_pid, pid) do
       {:ok, config}
     end
   end
@@ -142,30 +141,6 @@ defmodule OffBroadwayRedisStream.RedixClient do
   end
 
   defp to_map(info, _acc), do: info
-
-  defp check_redis_version(config) do
-    with {:ok, info} <- info(config) do
-      if Version.compare(info["redis_version"], "6.0.0") in [:gt, :eq] do
-        :ok
-      else
-        {:error, "only supports Redis version >= 6"}
-      end
-    end
-  end
-
-  defp info(config) do
-    with {:ok, info} <- command(config.redix_pid, ~w(INFO server)) do
-      info =
-        String.split(info, "\n", trim: true)
-        |> Enum.reject(&String.starts_with?(&1, "#"))
-        |> Map.new(fn entry ->
-          [key, value] = String.split(entry, ":", parts: 2, trim: true)
-          {key, String.trim(value)}
-        end)
-
-      {:ok, info}
-    end
-  end
 
   defp validate_redix_opts(nil),
     do:

@@ -6,6 +6,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
   alias OffBroadwayRedisStream.RedisMock
 
   import Mox
+  import TestHelper
 
   defmodule Forwarder do
     use Broadway
@@ -394,18 +395,4 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     end
   end
 
-  defp redix_opts, do: [host: host(), port: port()]
-
-  defp host do
-    System.get_env("REDIS_HOST") || "localhost"
-  end
-
-  defp port do
-    if p = System.get_env("REDIS_PORT") do
-      {port, ""} = Integer.parse(p)
-      port
-    else
-      6379
-    end
-  end
 end

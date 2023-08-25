@@ -6,6 +6,10 @@ defmodule OffBroadwayRedisStream.Heartbeat do
 
   @max_id round(:math.pow(2, 64)) - 1
 
+  def start_link(opts) do
+    start_link(opts[:client], opts[:config], opts[:heartbeat_interval])
+  end
+
   def start_link(client, config, heartbeat_interval) do
     GenServer.start_link(__MODULE__, {client, config, heartbeat_interval})
   end
@@ -22,6 +26,7 @@ defmodule OffBroadwayRedisStream.Heartbeat do
 
   @impl true
   def handle_continue(nil, state) do
+    create_group(state)
     heartbeat(state)
     {:noreply, state}
   end
@@ -34,6 +39,25 @@ defmodule OffBroadwayRedisStream.Heartbeat do
 
   @redis_command_retry_timeout 300
   @max_retries 2
+
+  defp create_group(%{client: client, config: config} = state, retry_count \\ 0) do
+    # we need to ensure the group is created before a heartbeat will succeed
+    case client.create_group(config[:group_start_id], config) do
+      :ok ->
+        :ok
+
+      {:error, %RedisClient.ConnectionError{} = error} when retry_count < @max_retries ->
+        Logger.warn(
+          "Failed to create group, retry_count: #{retry_count}, reason: #{inspect(error.reason)}"
+        )
+
+        Process.sleep(@redis_command_retry_timeout * (retry_count + 1))
+        create_group(state, retry_count + 1)
+
+      {:error, error} ->
+        raise "Create group failed, " <> inspect(error)
+    end
+  end
 
   defp heartbeat(
          %{client: client, config: config, heartbeat_interval: interval} = state,
