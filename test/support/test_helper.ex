@@ -1,4 +1,5 @@
 defmodule TestHelper do
+  @moduledoc false
   def redix_opts, do: [host: host(), port: port()]
 
   def host do
