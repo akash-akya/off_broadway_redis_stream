@@ -47,8 +47,7 @@ defmodule OffBroadwayRedisStream.FaultToleranceTest do
 
   test "producer starts with unreachable redis" do
     assert {:ok, pid} = DummyProducer.start_link(@opts)
-
-    stop_process(pid)
+    :ok = GenServer.stop(pid)
   end
 
   test "producer does not kill supervisor" do
@@ -62,7 +61,7 @@ defmodule OffBroadwayRedisStream.FaultToleranceTest do
     Process.sleep(1000)
     assert Process.alive?(pid)
 
-    stop_process(pid)
+    :ok = Supervisor.stop(pid)
   end
 
   test "heartbeat does not kill supervisor with unreachable redis" do
@@ -78,12 +77,12 @@ defmodule OffBroadwayRedisStream.FaultToleranceTest do
     Process.sleep(1000)
     assert Process.alive?(pid)
 
-    stop_process(pid)
+    :ok = Supervisor.stop(pid)
   end
 
   test "slow heartbeat startup does not crash producer" do
-    {:ok, agent} = Agent.start_link(fn -> [] end)
-    {:ok, redix} = Redix.start_link(redix_opts())
+    agent = start_supervised!({Agent, fn -> [] end})
+    redix = start_supervised!({Redix, redix_opts()})
 
     stream = "my-stream"
     group = "my-group"
@@ -94,7 +93,8 @@ defmodule OffBroadwayRedisStream.FaultToleranceTest do
     {:ok, _} = Redix.command(redix, ~w(XADD #{stream} * foo bar biz baz))
 
     opts = [
-      redis_client_opts: Keyword.merge(redix_opts(),  sync_connect: false, exit_on_disconnection: false),
+      redis_client_opts:
+        Keyword.merge(redix_opts(), sync_connect: false, exit_on_disconnection: false),
       client: SlowRedixClient,
       stream: stream,
       group: group,
@@ -105,18 +105,15 @@ defmodule OffBroadwayRedisStream.FaultToleranceTest do
       heartbeat_sleep: 500
     ]
 
-    assert {:ok, pid } = DummyProducer.start_link(opts)
+    assert {:ok, pid} = DummyProducer.start_link(opts)
 
     Process.sleep(2_000)
 
-    messages = Agent.get(agent, fn  list -> list end)
+    messages = Agent.get(agent, fn list -> list end)
     assert length(messages) == 1
 
     {:ok, _} = Redix.command(redix, ~w(DEL #{stream}))
 
-    stop_process(pid)
-    stop_process(redix)
-    stop_process(agent)
+    :ok = GenServer.stop(pid)
   end
-
 end
