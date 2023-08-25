@@ -14,7 +14,6 @@ defmodule OffBroadwayRedisStream.SlowRedixClient do
   @impl true
   defdelegate consumers_info(config), to: RedixClient
 
-
   @impl true
   def create_group(id, config) do
     Process.sleep(config[:heartbeat_sleep])
@@ -36,5 +35,3 @@ defmodule OffBroadwayRedisStream.SlowRedixClient do
   @impl true
   defdelegate delete_consumers(consumers, config), to: RedixClient
 end
-
-

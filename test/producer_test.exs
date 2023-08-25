@@ -394,5 +394,4 @@ defmodule OffBroadwayRedisStream.ProducerTest do
       {:DOWN, ^ref, _, _, _} -> :ok
     end
   end
-
 end
