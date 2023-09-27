@@ -153,7 +153,7 @@ defmodule OffBroadwayRedisStream.Producer do
         {:noreply, [], %{state | pending_ack: []}}
 
       {:error, error} ->
-        Logger.warn(
+        Logger.warning(
           "Unable to acknowledge and delete messages with Redis. Reason: #{inspect(error)}"
         )
 
@@ -175,7 +175,7 @@ defmodule OffBroadwayRedisStream.Producer do
         {:noreply, [], %{state | pending_ack: []}}
 
       {:error, error} ->
-        Logger.warn("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
+        Logger.warning("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
 
         if length(ids) > state.max_pending_ack do
           {:stop, "Pending ack count is more than maximum limit #{state.max_pending_ack}", state}
@@ -197,7 +197,7 @@ defmodule OffBroadwayRedisStream.Producer do
         :ok
 
       {:error, error} ->
-        Logger.warn(
+        Logger.warning(
           "Unable to acknowledge and delete messages with Redis. Reason: #{inspect(error)}"
         )
     end
@@ -213,7 +213,7 @@ defmodule OffBroadwayRedisStream.Producer do
         :ok
 
       {:error, error} ->
-        Logger.warn("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
+        Logger.warning("Unable to acknowledge messages with Redis. Reason: #{inspect(error)}")
     end
 
     Heartbeat.stop(state.heartbeat_pid)
@@ -463,7 +463,7 @@ defmodule OffBroadwayRedisStream.Producer do
 
     case apply(client, func, args ++ [redis_config]) do
       {:error, %RedisClient.ConnectionError{} = error} when retry_count < max_retries ->
-        Logger.warn(
+        Logger.warning(
           "Failed to run #{func}, retry_count: #{retry_count}, reason: #{inspect(error.reason)}"
         )
 
