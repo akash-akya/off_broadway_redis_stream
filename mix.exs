@@ -1,7 +1,7 @@
 defmodule OffBroadwayRedisStream.MixProject do
   use Mix.Project
 
-  @version "0.6.0"
+  @version "0.7.0"
   @scm_url "https://github.com/akash-akya/off_broadway_redis_stream"
 
   def project do
