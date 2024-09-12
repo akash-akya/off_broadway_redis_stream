@@ -51,8 +51,8 @@ defmodule OffBroadwayRedisStream.MixProject do
 
   defp deps do
     [
-      {:broadway, "~> 1.0 or ~> 0.6"},
-      {:redix, ">= 0.0.0"},
+      {:broadway, "~> 1.0"},
+      {:redix, "~> 1.0"},
 
       # development & test
       {:mox, "~> 1.0", only: :test},
