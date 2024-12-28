@@ -5,10 +5,35 @@
 [![docs](https://img.shields.io/badge/docs-hexpm-blue.svg)](https://hexdocs.pm/off_broadway_redis_stream/)
 
 A Redis Stream consumer for [Broadway](https://github.com/dashbitco/broadway).
+A Redis Stream consumer implementation for [Broadway](https://github.com/dashbitco/broadway), enabling concurrent processing of Redis Stream messages with built-in fault tolerance and automatic failover.
 
-Broadway producer acts as a consumer in the specified Redis stream consumer group. You can run multiple consumers to get better throughput and fault tolerance. Please check [Redis Stream Intro](https://redis.io/topics/streams-intro) for details on stream data type.
+
+## Features
+
+- Seamless integration with Broadway for concurrent message processing
+- Automatic failover and message recovery when nodes fail
+- Configurable consumer groups for distributed processing
+- Message retry handling with configurable attempts
 
 It supports failover by automatically claiming pending messages when a node dies. A node is considered dead when it fails to send heartbeats.
+
+## Installation
+
+Add `off_broadway_redis_stream` to your list of dependencies in `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:off_broadway_redis_stream, "~> x.x.x"}
+  ]
+end
+```
+
+## Usage
+
+### Basic Setup
+
+Here's a complete example demonstrating how to set up a Broadway pipeline with Redis Stream:
 
 ```elixir
 defmodule MyBroadway do
@@ -59,17 +84,7 @@ defmodule MyBroadway do
 end
 ```
 
-Currently, it only supports Redis 6.0.2 and above.
-
-## Installation
-
-```elixir
-def deps do
-  [
-    {:off_broadway_redis_stream, "~> x.x.x"}
-  ]
-end
-```
+Check [documentation](https://hex.pm/packages/off_broadway_redis_stream) for more details.
 
 ### License
 
