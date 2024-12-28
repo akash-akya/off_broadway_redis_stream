@@ -114,6 +114,7 @@ defmodule OffBroadwayRedisStream.Producer do
           Map.new(opts)
           |> Map.merge(%{
             demand: 0,
+            draining: false,
             redis_client: client,
             redis_config: redis_config,
             receive_timer: nil,
@@ -131,11 +132,6 @@ defmodule OffBroadwayRedisStream.Producer do
   @impl GenStage
   def handle_demand(demand, state) do
     receive_messages(%{state | demand: state.demand + demand})
-  end
-
-  @impl GenStage
-  def handle_info(:receive_messages, %{receive_timer: nil} = state) do
-    {:noreply, [], state}
   end
 
   @impl GenStage
@@ -221,9 +217,8 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   @impl Producer
-  def prepare_for_draining(%{receive_timer: receive_timer} = state) do
-    receive_timer && Process.cancel_timer(receive_timer)
-    {:noreply, [], %{state | receive_timer: nil}}
+  def prepare_for_draining(state) do
+    {:noreply, [], %{state | draining: true}}
   end
 
   defp ack_and_delete_messages(ids, state, retry_count \\ 0) do
@@ -233,6 +228,10 @@ defmodule OffBroadwayRedisStream.Producer do
     else
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp receive_messages(%{draining: true} = state) do
+    {:noreply, [], state}
   end
 
   defp receive_messages(%{receive_timer: nil, demand: demand} = state) when demand > 0 do
