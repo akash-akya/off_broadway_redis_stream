@@ -274,7 +274,7 @@ defmodule OffBroadwayRedisStream.Producer do
     if now - last_checked > expire_time do
       {redis_messages, state} = claim_dead_consumer_messages(state)
 
-      if length(redis_messages) > 0 do
+      if redis_messages != [] do
         %{stream: stream, group: group} = state
         {wrap_messages(redis_messages, stream, group), last_checked}
       else
