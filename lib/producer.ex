@@ -440,7 +440,7 @@ defmodule OffBroadwayRedisStream.Producer do
   end
 
   defp prepare_failed_messages(messages) do
-    Enum.map(messages, fn message ->
+    Enum.map(messages, fn %Message{} = message ->
       {_, ack_ref, ack_data} = message.acknowledger
 
       metadata =

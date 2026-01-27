@@ -26,7 +26,7 @@ defmodule OffBroadwayRedisStream.ProducerTest do
     end
 
     def handle_failed(messages, context) do
-      Enum.map(messages, fn %{metadata: %{attempt: attempt} = metadata} = message ->
+      Enum.map(messages, fn %Message{metadata: %{attempt: attempt} = metadata} = message ->
         case context.action do
           {:fail, max} when attempt < max ->
             Message.configure_ack(message, retry: true)
