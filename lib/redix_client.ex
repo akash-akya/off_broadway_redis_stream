@@ -52,7 +52,7 @@ defmodule OffBroadwayRedisStream.RedixClient do
 
     case command(pid, cmd) do
       {:ok, _} -> :ok
-      {:error, %Redix.Error{message: "BUSYGROUP Consumer Group name already exists"}} -> :ok
+      {:error, %Redix.Error{message: "BUSYGROUP" <> _}} -> :ok
       result -> result
     end
   end
