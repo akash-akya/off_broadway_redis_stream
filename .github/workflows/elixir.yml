@@ -1,85 +1,34 @@
 name: Elixir CI
 
-on: [push, pull_request]
+on:
+  - push
+  - pull_request
 
 jobs:
-  linux:
-    runs-on: ubuntu-20.04
-    name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
-    strategy:
-      matrix:
-        include:
-          - elixir: "1.14"
-            otp: "24"
-          - elixir: "1.15"
-            otp: "25"
-          - elixir: "1.16"
-            otp: "26"
-          - elixir: "1.17"
-            otp: "27"
-    services:
-      redis:
-        image: redis:6-alpine
-        # Set health checks to wait until redis has started
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          # Maps port 6379 on service container to the host
-          - 6379:6379
-
-    steps:
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{matrix.otp}}
-          elixir-version: ${{matrix.elixir}}
-
-      - uses: actions/checkout@v3
-
-      - name: Cache Dependencies
-        id: mix-cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            deps
-            _build
-          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
-
-      - name: Install Dependencies
-        if: steps.mix-cache.outputs.cache-hit != 'true'
-        run: |
-          mix deps.get
-          mix deps.compile
-
-      - run: mix deps.get
-      - run: mix compile --force --warnings-as-errors
-      - run: mix test --trace
-
   lint:
-    runs-on: ubuntu-22.04
-    name: Lint
+    runs-on: ubuntu-latest
+    name: Lint OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
       matrix:
         include:
-          - elixir: 1.17.x
-            otp: 27.x
+          - elixir: 1.19.x
+            otp: 28.x
     steps:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Cache Dependencies
         id: mix-cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             deps
             _build
+            priv/plts
           key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
 
       - name: Install Dependencies
@@ -93,5 +42,54 @@ jobs:
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
       - run: mix credo --strict
       - run: mix dialyzer --quiet
+
+  linux:
+    runs-on: ubuntu-latest
+    name: Linux OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    strategy:
+      matrix:
+        include:
+          - elixir: 1.18.x
+            otp: 27.x
+          - elixir: 1.19.x
+            otp: 28.x
+    services:
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
+
+      - uses: actions/checkout@v4
+
+      - name: Cache Dependencies
+        id: mix-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install Dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mix deps.get
+          mix deps.compile
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: mix test --trace
